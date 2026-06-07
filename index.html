@@ -63,7 +63,34 @@
     function lsLoad(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } }
     function lsSave(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
-    function HistoryDay({ d, logs, logKey, onGoDay, onToggle, onDelete }) {
+    function ItemRow({ item, cat, onToggle, onDelete, onEdit }) {
+      const [editing, setEditing] = useState(false);
+      const [editVal, setEditVal] = useState(item.text);
+      const save = () => { if (editVal.trim()) onEdit(item.id, editVal.trim()); setEditing(false); };
+      return (
+        <div style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"7px 10px", borderRadius:7, border:`1.5px solid ${item.done?"#e2e8f0":cat.border}`, background:item.done?"#f7fafc":cat.bg, marginBottom:5 }}>
+          <button onClick={() => onToggle(item.id)} style={{ width:18, height:18, borderRadius:4, border:`2px solid ${item.done?"#aaa":cat.color}`, background:item.done?"#aaa":"transparent", cursor:"pointer", flexShrink:0, marginTop:2, display:"flex", alignItems:"center", justifyContent:"center" }}>
+            {item.done && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
+          </button>
+          {editing ? (
+            <>
+              <input value={editVal} onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") save(); if(e.key==="Escape") setEditing(false); }} autoFocus style={{ flex:1, fontSize:13, border:"1.5px solid "+cat.border, borderRadius:5, padding:"2px 6px", outline:"none" }} />
+              <button onClick={save} style={{ background:"none", border:"none", cursor:"pointer", color:cat.color, fontSize:13, fontWeight:700, padding:"0 2px" }}>저장</button>
+              <button onClick={()=>setEditing(false)} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:13, padding:"0 2px" }}>취소</button>
+            </>
+          ) : (
+            <>
+              <span style={{ flex:1, fontSize:13, color:item.done?"#a0aec0":"#2d3748", textDecoration:item.done?"line-through":"none", lineHeight:1.5 }}>{item.text}</span>
+              <span style={{ fontSize:11, color:"#a0aec0", flexShrink:0 }}>{item.createdAt}</span>
+              <button onClick={()=>{ setEditVal(item.text); setEditing(true); }} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:13, padding:"0 2px", flexShrink:0 }}>✏️</button>
+              <button onClick={() => onDelete(item.id)} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:15, padding:"0 2px", flexShrink:0 }}>×</button>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    function HistoryDay({ d, logs, logKey, onGoDay, onToggle, onDelete, onEdit }) {
       const [open, setOpen] = useState(true);
       const dayData = logs[logKey] || {};
       const total = CATS.reduce((s,c) => s + (dayData[c.key]||[]).length, 0);
@@ -96,14 +123,10 @@
                       <span style={{ fontSize:13, fontWeight:500, color:cat.color }}>{cat.label}</span>
                     </div>
                     {items.map(item => (
-                      <div key={item.id} style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"7px 10px", borderRadius:7, border:`1.5px solid ${item.done?"#e2e8f0":cat.border}`, background:item.done?"#f7fafc":cat.bg, marginBottom:5 }}>
-                        <button onClick={() => onToggle(logKey, cat.key, item.id)} style={{ width:18, height:18, borderRadius:4, border:`2px solid ${item.done?"#aaa":cat.color}`, background:item.done?"#aaa":"transparent", cursor:"pointer", flexShrink:0, marginTop:2, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                          {item.done && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
-                        </button>
-                        <span style={{ flex:1, fontSize:13, color:item.done?"#a0aec0":"#2d3748", textDecoration:item.done?"line-through":"none", lineHeight:1.5 }}>{item.text}</span>
-                        <span style={{ fontSize:11, color:"#a0aec0", flexShrink:0 }}>{item.createdAt}</span>
-                        <button onClick={() => onDelete(logKey, cat.key, item.id)} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:15, padding:"0 2px", flexShrink:0 }}>×</button>
-                      </div>
+                      <ItemRow key={item.id} item={item} cat={cat}
+                        onToggle={(id) => onToggle(logKey, cat.key, id)}
+                        onDelete={(id) => onDelete(logKey, cat.key, id)}
+                        onEdit={(id, text) => onEdit(logKey, cat.key, id, text)} />
                     ))}
                   </div>
                 );
@@ -192,7 +215,10 @@
         const nl = { ...logs, [key]: { ...(logs[key]||{}), [cat]: (logs[key]?.[cat]||[]).map(i => i.id===id?{...i,done:!i.done}:i) } };
         setLogs(nl); sync(sites, nl);
       };
-      const deleteItem = (key, cat, id) => {
+      const editItem = (key, cat, id, text) => {
+        const nl = { ...logs, [key]: { ...(logs[key]||{}), [cat]: (logs[key]?.[cat]||[]).map(i => i.id===id?{...i,text}:i) } };
+        setLogs(nl); sync(sites, nl);
+      };
         const nl = { ...logs, [key]: { ...(logs[key]||{}), [cat]: (logs[key]?.[cat]||[]).filter(i => i.id!==id) } };
         setLogs(nl); sync(sites, nl);
       };
@@ -254,7 +280,7 @@
                     : siteDates.map(d => (
                         <HistoryDay key={d} d={d} logs={logs} logKey={`${curSite}_${d}`}
                           onGoDay={()=>{ setCurDate(d); setView("day"); }}
-                          onToggle={toggleItem} onDelete={deleteItem} />
+                          onToggle={toggleItem} onDelete={deleteItem} onEdit={editItem} />
                       ))
                   }
                 </div>
@@ -270,16 +296,10 @@
                       </div>
                       {items.length===0 && <div style={{ fontSize:13, color:"#a0aec0", padding:"8px 0 4px 12px" }}>항목 없음</div>}
                       {items.map(item => (
-                        <div key={item.id} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"9px 12px", borderRadius:8, border:`1.5px solid ${item.done?"#e2e8f0":cat.border}`, background:item.done?"#f7fafc":cat.bg, marginBottom:6 }}>
-                          <button onClick={()=>toggleItem(logKey, cat.key, item.id)} style={{ width:20, height:20, borderRadius:5, border:`2px solid ${item.done?"#aaa":cat.color}`, background:item.done?"#aaa":"transparent", cursor:"pointer", flexShrink:0, marginTop:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                            {item.done && <span style={{ color:"#fff", fontSize:13, fontWeight:700 }}>✓</span>}
-                          </button>
-                          <div style={{ flex:1 }}>
-                            <span style={{ fontSize:14, color:item.done?"#a0aec0":"#2d3748", textDecoration:item.done?"line-through":"none", lineHeight:1.5 }}>{item.text}</span>
-                            <span style={{ fontSize:11, color:"#a0aec0", marginLeft:8 }}>{item.createdAt}</span>
-                          </div>
-                          <button onClick={()=>deleteItem(logKey, cat.key, item.id)} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:16, padding:"0 2px", flexShrink:0 }}>×</button>
-                        </div>
+                        <ItemRow key={item.id} item={item} cat={cat}
+                          onToggle={(id) => toggleItem(logKey, cat.key, id)}
+                          onDelete={(id) => deleteItem(logKey, cat.key, id)}
+                          onEdit={(id, text) => editItem(logKey, cat.key, id, text)} />
                       ))}
                       <div style={{ display:"flex", gap:6, marginTop:6 }}>
                         <input ref={inputRefs[cat.key]} value={inputs[cat.key]} onChange={e=>setInputs(p=>({...p,[cat.key]:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addItem(cat.key)} placeholder={`${cat.label} 항목 추가...`} style={{ flex:1, padding:"8px 12px", fontSize:13, borderRadius:8, border:"1.5px solid #e2e8f0", outline:"none" }} />
