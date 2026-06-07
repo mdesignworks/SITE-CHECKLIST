@@ -10,25 +10,28 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-    const firebaseConfig = {
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    firebase.initializeApp({
       apiKey: "AIzaSyAF4oLS8by7d5O4ran-qiBy4JRF2ydL7qk",
       authDomain: "site-checklist-c79b3.firebaseapp.com",
       projectId: "site-checklist-c79b3",
       storageBucket: "site-checklist-c79b3.firebasestorage.app",
       messagingSenderId: "294420287921",
       appId: "1:294420287921:web:62ffe0b262091cb656ad90"
-    };
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    window._db = db;
-    window._fsDoc = doc;
-    window._fsSetDoc = setDoc;
-    window._fsGetDoc = getDoc;
-    window._firebaseReady = true;
-    window.dispatchEvent(new Event("firebaseReady"));
+    });
+    const db = firebase.firestore();
+    async function cloudSave(sites, logs) {
+      try { await db.collection("data").doc("main").set({ sites: JSON.stringify(sites), logs: JSON.stringify(logs) }); } catch(e) { console.warn("save err", e); }
+    }
+    async function cloudLoad() {
+      try {
+        const snap = await db.collection("data").doc("main").get();
+        if (snap.exists) return { sites: JSON.parse(snap.data().sites||"[]"), logs: JSON.parse(snap.data().logs||"{}") };
+      } catch(e) { console.warn("load err", e); }
+      return null;
+    }
   </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -57,31 +60,8 @@
       const d = new Date(s);
       return `${s.slice(5).replace("-","/")} (${days[d.getDay()]})`;
     };
-
-    function load(key) {
-      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
-    }
-    function save(key, val) {
-      try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
-    }
-    async function syncToCloud(sites, logs) {
-      try {
-        if (!window._db) return;
-        const ref = window._fsDoc(window._db, "data", "main");
-        await window._fsSetDoc(ref, { sites: JSON.stringify(sites), logs: JSON.stringify(logs) });
-      } catch(e) { console.warn("cloud save failed", e); }
-    }
-    async function loadFromCloud() {
-      try {
-        if (!window._db) return null;
-        const ref = window._fsDoc(window._db, "data", "main");
-        const snap = await window._fsGetDoc(ref);
-        if (snap.exists()) {
-          return { sites: JSON.parse(snap.data().sites || "[]"), logs: JSON.parse(snap.data().logs || "{}") };
-        }
-      } catch(e) { console.warn("cloud load failed", e); }
-      return null;
-    }
+    function lsLoad(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } }
+    function lsSave(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
     function HistoryDay({ d, logs, logKey, onGoDay, onToggle, onDelete }) {
       const [open, setOpen] = useState(true);
@@ -136,60 +116,65 @@
     }
 
     function App() {
-      const [sites, setSites]       = useState(() => load("sites") || []);
-      const [curSite, setCurSite]   = useState(() => { const s = load("sites") || []; return s.length ? s[0].id : null; });
-      const [curDate, setCurDate]   = useState(today);
-      const [logs, setLogs]         = useState(() => load("logs") || {});
-      const [view, setView]         = useState("history");
+      const [sites, setSites]     = useState([]);
+      const [curSite, setCurSite] = useState(null);
+      const [curDate, setCurDate] = useState(today);
+      const [logs, setLogs]       = useState({});
+      const [view, setView]       = useState("history");
       const [newSiteName, setNewSiteName] = useState("");
       const [addingSite, setAddingSite]   = useState(false);
-      const [inputs, setInputs]     = useState({ required:"", request:"", change:"" });
-      const [syncing, setSyncing]   = useState(false);
+      const [inputs, setInputs]   = useState({ required:"", request:"", change:"" });
+      const [syncing, setSyncing] = useState(false);
       const [lastSync, setLastSync] = useState(null);
+      const [loaded, setLoaded]   = useState(false);
       const inputRefs = { required: useRef(), request: useRef(), change: useRef() };
       const syncTimer = useRef(null);
 
-      // 앱 시작시 클라우드에서 불러오기
       useEffect(() => {
-        const doLoad = async () => {
-          const cloud = await loadFromCloud();
-          if (cloud) {
+        (async () => {
+          const cloud = await cloudLoad();
+          if (cloud && cloud.sites.length > 0) {
             setSites(cloud.sites);
             setLogs(cloud.logs);
-            if (cloud.sites.length) setCurSite(cloud.sites[0].id);
-            save("sites", cloud.sites);
-            save("logs", cloud.logs);
+            setCurSite(cloud.sites[0].id);
+            lsSave("sites", cloud.sites);
+            lsSave("logs", cloud.logs);
+          } else {
+            const ls = lsLoad("sites") || [];
+            const ll = lsLoad("logs") || {};
+            setSites(ls);
+            setLogs(ll);
+            if (ls.length) setCurSite(ls[0].id);
           }
-        };
-        if (window._firebaseReady) doLoad();
-        else window.addEventListener("firebaseReady", doLoad, { once: true });
+          setLoaded(true);
+        })();
       }, []);
 
-      // 변경시 로컬 + 클라우드 저장 (1초 디바운스)
-      const syncData = (newSites, newLogs) => {
-        save("sites", newSites);
-        save("logs", newLogs);
+      const sync = (newSites, newLogs) => {
+        lsSave("sites", newSites);
+        lsSave("logs", newLogs);
         clearTimeout(syncTimer.current);
         setSyncing(true);
         syncTimer.current = setTimeout(async () => {
-          await syncToCloud(newSites, newLogs);
+          await cloudSave(newSites, newLogs);
           setSyncing(false);
-          setLastSync(new Date().toLocaleTimeString("ko-KR", {hour:"2-digit", minute:"2-digit"}));
-        }, 1000);
+          setLastSync(new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}));
+        }, 800);
       };
 
       const addSite = () => {
         const name = newSiteName.trim(); if (!name) return;
         const id = "site_" + Date.now();
-        const updated = [...sites, { id, name, createdAt: today }];
-        setSites(updated); setCurSite(id); setNewSiteName(""); setAddingSite(false);
+        const ns = [...sites, { id, name, createdAt: today }];
+        setSites(ns); setCurSite(id); setNewSiteName(""); setAddingSite(false);
+        sync(ns, logs);
       };
       const deleteSite = (id) => {
         if (!confirm("현장을 삭제하면 모든 일지가 사라집니다. 삭제할까요?")) return;
-        const updated = sites.filter(s => s.id !== id);
-        setSites(updated);
+        const ns = sites.filter(s => s.id !== id);
         const nl = {...logs}; Object.keys(nl).forEach(k => { if(k.startsWith(id+"_")) delete nl[k]; });
-        setLogs(nl); setCurSite(updated.length ? updated[0].id : null);
+        setSites(ns); setLogs(nl); setCurSite(ns.length ? ns[0].id : null);
+        sync(ns, nl);
       };
 
       const logKey = curSite ? `${curSite}_${curDate}` : null;
@@ -198,41 +183,39 @@
       const addItem = (cat) => {
         const text = inputs[cat].trim(); if (!text || !logKey) return;
         const item = { id: Date.now(), text, done: false, createdAt: new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}) };
-        setLogs(prev => ({ ...prev, [logKey]: { ...dayLog, [cat]: [...(dayLog[cat]||[]), item] } }));
+        const nl = { ...logs, [logKey]: { ...dayLog, [cat]: [...(dayLog[cat]||[]), item] } };
+        setLogs(nl); sync(sites, nl);
         setInputs(p => ({ ...p, [cat]:"" }));
         inputRefs[cat]?.current?.focus();
       };
-
       const toggleItem = (key, cat, id) => {
-        setLogs(prev => {
-          const d = prev[key] || {};
-          return { ...prev, [key]: { ...d, [cat]: (d[cat]||[]).map(i => i.id===id ? {...i,done:!i.done} : i) } };
-        });
+        const nl = { ...logs, [key]: { ...(logs[key]||{}), [cat]: (logs[key]?.[cat]||[]).map(i => i.id===id?{...i,done:!i.done}:i) } };
+        setLogs(nl); sync(sites, nl);
       };
       const deleteItem = (key, cat, id) => {
-        setLogs(prev => {
-          const d = prev[key] || {};
-          return { ...prev, [key]: { ...d, [cat]: (d[cat]||[]).filter(i => i.id!==id) } };
-        });
+        const nl = { ...logs, [key]: { ...(logs[key]||{}), [cat]: (logs[key]?.[cat]||[]).filter(i => i.id!==id) } };
+        setLogs(nl); sync(sites, nl);
       };
 
       const siteDates = curSite
-        ? [...new Set(Object.keys(logs).filter(k => k.startsWith(curSite+"_")).map(k => k.replace(curSite+"_","")).filter(d => CATS.some(c => (logs[curSite+"_"+d]?.[c.key]||[]).length > 0)))].sort((a,b) => b.localeCompare(a))
+        ? [...new Set(Object.keys(logs).filter(k=>k.startsWith(curSite+"_")).map(k=>k.replace(curSite+"_","")).filter(d=>CATS.some(c=>(logs[curSite+"_"+d]?.[c.key]||[]).length>0)))].sort((a,b)=>b.localeCompare(a))
         : [];
+
+      if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
 
       return (
         <div style={{ fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", maxWidth:680, margin:"0 auto", padding:"16px 12px", minHeight:"100vh" }}>
 
           {/* 동기화 상태 */}
-          <div style={{ textAlign:"right", fontSize:11, color:"#a0aec0", marginBottom:6 }}>
+          <div style={{ textAlign:"right", fontSize:11, color:"#a0aec0", marginBottom:8 }}>
             {syncing ? "⏳ 저장 중..." : lastSync ? `✅ ${lastSync} 동기화됨` : ""}
           </div>
 
           {/* 현장 탭 */}
           <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:16 }}>
             {sites.map(s => (
-              <div key={s.id} style={{ display:"flex", alignItems:"center", borderRadius:20, overflow:"hidden", border: curSite===s.id ? "2px solid #4a5568" : "1.5px solid #e2e8f0", background: curSite===s.id ? "#edf2f7" : "transparent" }}>
-                <button onClick={() => { setCurSite(s.id); setView("history"); }} style={{ padding:"6px 14px", fontSize:13, fontWeight: curSite===s.id?500:400, background:"none", border:"none", cursor:"pointer", color:"#2d3748" }}>{s.name}</button>
+              <div key={s.id} style={{ display:"flex", alignItems:"center", borderRadius:20, overflow:"hidden", border: curSite===s.id?"2px solid #4a5568":"1.5px solid #e2e8f0", background: curSite===s.id?"#edf2f7":"transparent" }}>
+                <button onClick={() => { setCurSite(s.id); setView("history"); }} style={{ padding:"6px 14px", fontSize:13, fontWeight:curSite===s.id?500:400, background:"none", border:"none", cursor:"pointer", color:"#2d3748" }}>{s.name}</button>
                 <button onClick={() => deleteSite(s.id)} style={{ padding:"4px 8px 4px 0", background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:13 }}>×</button>
               </div>
             ))}
@@ -240,10 +223,10 @@
               <div style={{ display:"flex", gap:4 }}>
                 <input value={newSiteName} onChange={e=>setNewSiteName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSite()} placeholder="현장명 입력" style={{ padding:"5px 10px", fontSize:13, borderRadius:20, border:"1.5px solid #cbd5e0", outline:"none", width:120 }} autoFocus />
                 <button onClick={addSite} style={{ padding:"5px 12px", fontSize:12, borderRadius:20, background:"#2d3748", color:"#fff", border:"none", cursor:"pointer" }}>추가</button>
-                <button onClick={() => setAddingSite(false)} style={{ padding:"5px 10px", fontSize:12, borderRadius:20, background:"none", border:"1.5px solid #e2e8f0", cursor:"pointer", color:"#718096" }}>취소</button>
+                <button onClick={()=>setAddingSite(false)} style={{ padding:"5px 10px", fontSize:12, borderRadius:20, background:"none", border:"1.5px solid #e2e8f0", cursor:"pointer", color:"#718096" }}>취소</button>
               </div>
             ) : (
-              <button onClick={() => setAddingSite(true)} style={{ padding:"6px 14px", fontSize:13, borderRadius:20, border:"1.5px dashed #cbd5e0", background:"none", cursor:"pointer", color:"#a0aec0" }}>+ 현장 추가</button>
+              <button onClick={()=>setAddingSite(true)} style={{ padding:"6px 14px", fontSize:13, borderRadius:20, border:"1.5px dashed #cbd5e0", background:"none", cursor:"pointer", color:"#a0aec0" }}>+ 현장 추가</button>
             )}
           </div>
 
@@ -251,27 +234,26 @@
             <div style={{ textAlign:"center", padding:"60px 0", color:"#a0aec0", fontSize:14 }}>현장을 추가해주세요</div>
           ) : (
             <>
-              {/* 날짜 + 뷰 토글 */}
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, gap:8, flexWrap:"wrap" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <button onClick={() => { const d=new Date(curDate); d.setDate(d.getDate()-1); setCurDate(fmtDate(d)); setView("day"); }} style={navBtn}>‹</button>
+                  <button onClick={()=>{ const d=new Date(curDate); d.setDate(d.getDate()-1); setCurDate(fmtDate(d)); setView("day"); }} style={navBtn}>‹</button>
                   <input type="date" value={curDate} onChange={e=>{setCurDate(e.target.value);setView("day");}} style={{ fontSize:14, fontWeight:500, background:"none", border:"none", outline:"none", cursor:"pointer", color:"#2d3748" }} />
                   <span style={{ fontSize:13, color:"#a0aec0" }}>({["일","월","화","수","목","금","토"][new Date(curDate).getDay()]})</span>
-                  <button onClick={() => { const d=new Date(curDate); d.setDate(d.getDate()+1); setCurDate(fmtDate(d)); setView("day"); }} style={navBtn}>›</button>
+                  <button onClick={()=>{ const d=new Date(curDate); d.setDate(d.getDate()+1); setCurDate(fmtDate(d)); setView("day"); }} style={navBtn}>›</button>
                 </div>
                 <div style={{ display:"flex", gap:4 }}>
-                  <button onClick={() => setView("day")} style={{ ...viewBtn, fontWeight:view==="day"?500:400, borderColor:view==="day"?"#4a5568":"#e2e8f0", background:view==="day"?"#edf2f7":"none" }}>날짜별 입력</button>
-                  <button onClick={() => setView("history")} style={{ ...viewBtn, fontWeight:view==="history"?500:400, borderColor:view==="history"?"#4a5568":"#e2e8f0", background:view==="history"?"#edf2f7":"none" }}>전체 이력</button>
+                  <button onClick={()=>setView("day")} style={{ ...viewBtn, fontWeight:view==="day"?500:400, borderColor:view==="day"?"#4a5568":"#e2e8f0", background:view==="day"?"#edf2f7":"none" }}>날짜별 입력</button>
+                  <button onClick={()=>setView("history")} style={{ ...viewBtn, fontWeight:view==="history"?500:400, borderColor:view==="history"?"#4a5568":"#e2e8f0", background:view==="history"?"#edf2f7":"none" }}>전체 이력</button>
                 </div>
               </div>
 
-              {view === "history" ? (
+              {view==="history" ? (
                 <div>
-                  {siteDates.length === 0
+                  {siteDates.length===0
                     ? <div style={{ color:"#a0aec0", fontSize:14, padding:"40px 0", textAlign:"center" }}>아직 기록이 없습니다</div>
                     : siteDates.map(d => (
                         <HistoryDay key={d} d={d} logs={logs} logKey={`${curSite}_${d}`}
-                          onGoDay={() => { setCurDate(d); setView("day"); }}
+                          onGoDay={()=>{ setCurDate(d); setView("day"); }}
                           onToggle={toggleItem} onDelete={deleteItem} />
                       ))
                   }
@@ -289,19 +271,19 @@
                       {items.length===0 && <div style={{ fontSize:13, color:"#a0aec0", padding:"8px 0 4px 12px" }}>항목 없음</div>}
                       {items.map(item => (
                         <div key={item.id} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"9px 12px", borderRadius:8, border:`1.5px solid ${item.done?"#e2e8f0":cat.border}`, background:item.done?"#f7fafc":cat.bg, marginBottom:6 }}>
-                          <button onClick={() => toggleItem(logKey, cat.key, item.id)} style={{ width:20, height:20, borderRadius:5, border:`2px solid ${item.done?"#aaa":cat.color}`, background:item.done?"#aaa":"transparent", cursor:"pointer", flexShrink:0, marginTop:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          <button onClick={()=>toggleItem(logKey, cat.key, item.id)} style={{ width:20, height:20, borderRadius:5, border:`2px solid ${item.done?"#aaa":cat.color}`, background:item.done?"#aaa":"transparent", cursor:"pointer", flexShrink:0, marginTop:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
                             {item.done && <span style={{ color:"#fff", fontSize:13, fontWeight:700 }}>✓</span>}
                           </button>
                           <div style={{ flex:1 }}>
                             <span style={{ fontSize:14, color:item.done?"#a0aec0":"#2d3748", textDecoration:item.done?"line-through":"none", lineHeight:1.5 }}>{item.text}</span>
                             <span style={{ fontSize:11, color:"#a0aec0", marginLeft:8 }}>{item.createdAt}</span>
                           </div>
-                          <button onClick={() => deleteItem(logKey, cat.key, item.id)} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:16, padding:"0 2px", flexShrink:0 }}>×</button>
+                          <button onClick={()=>deleteItem(logKey, cat.key, item.id)} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:16, padding:"0 2px", flexShrink:0 }}>×</button>
                         </div>
                       ))}
                       <div style={{ display:"flex", gap:6, marginTop:6 }}>
                         <input ref={inputRefs[cat.key]} value={inputs[cat.key]} onChange={e=>setInputs(p=>({...p,[cat.key]:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addItem(cat.key)} placeholder={`${cat.label} 항목 추가...`} style={{ flex:1, padding:"8px 12px", fontSize:13, borderRadius:8, border:"1.5px solid #e2e8f0", outline:"none" }} />
-                        <button onClick={() => addItem(cat.key)} style={{ padding:"8px 16px", fontSize:13, borderRadius:8, background:cat.color, color:"#fff", border:"none", cursor:"pointer", fontWeight:500 }}>추가</button>
+                        <button onClick={()=>addItem(cat.key)} style={{ padding:"8px 16px", fontSize:13, borderRadius:8, background:cat.color, color:"#fff", border:"none", cursor:"pointer", fontWeight:500 }}>추가</button>
                       </div>
                     </div>
                   );
