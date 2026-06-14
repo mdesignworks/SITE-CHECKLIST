@@ -2,16 +2,21 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="현장일지" />
-  <title>현장 체크리스트</title>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="현장관리" />
+  <title>M Design Works · 현장 관리</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
   <script>
     firebase.initializeApp({
       apiKey: "AIzaSyAF4oLS8by7d5O4ran-qiBy4JRF2ydL7qk",
@@ -22,6 +27,21 @@
       appId: "1:294420287921:web:62ffe0b262091cb656ad90"
     });
     const db = firebase.firestore();
+    const storage = firebase.storage();
+
+    // ---- 사진 업로드 (Firebase Storage) ----
+    async function uploadPhoto(file, pathPrefix) {
+      const ext = (file.name && file.name.includes(".")) ? file.name.split(".").pop() : "jpg";
+      const path = `${pathPrefix}/${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+      const ref = storage.ref().child(path);
+      await ref.put(file);
+      return await ref.getDownloadURL();
+    }
+    async function deletePhoto(url) {
+      try { await storage.refFromURL(url).delete(); } catch(e) { console.warn("photo delete err", e); }
+    }
+
+    // ---- 체크리스트(기존) 데이터: data/main 문서 ----
     async function cloudSave(sites, logs) {
       try { await db.collection("data").doc("main").set({ sites: JSON.stringify(sites), logs: JSON.stringify(logs) }); } catch(e) { console.warn("save err", e); }
     }
@@ -32,17 +52,260 @@
       } catch(e) { console.warn("load err", e); }
       return null;
     }
+
+    // ---- 전역 토스트 알림 (React 쪽 ToastHost가 구독) ----
+    let _notify = (msg) => console.warn("[notify]", msg);
+    function notify(msg, type) { _notify(msg, type); }
+
+    // ---- 새 컬렉션 공용 헬퍼 (공정표/작업일지/비용/설정에서 사용) — siteId로 스코핑 ----
+    async function fetchCollection(name, siteId) {
+      try {
+        let q = db.collection(name);
+        if (siteId) q = q.where("siteId", "==", siteId);
+        const snap = await q.get();
+        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch(e) {
+        console.warn("fetch "+name+" err", e);
+        notify("데이터를 불러오지 못했습니다. 인터넷 연결을 확인해주세요.");
+        return [];
+      }
+    }
+    async function setDoc(collectionName, id, data) {
+      try { await db.collection(collectionName).doc(id).set(data, { merge: true }); return true; }
+      catch(e) { console.warn("setDoc err", e); notify("저장에 실패했습니다. 인터넷 연결을 확인해주세요."); return false; }
+    }
+    async function deleteDocFn(collectionName, id) {
+      try { await db.collection(collectionName).doc(id).delete(); return true; }
+      catch(e) { console.warn("deleteDoc err", e); notify("삭제에 실패했습니다. 인터넷 연결을 확인해주세요."); return false; }
+    }
+
+    // ---- 현장별 설정 (siteSettings/{siteId}) : 주소/기간/발주처/예산/알림/PIN/날씨위치 ----
+    async function getSiteSettings(siteId) {
+      try {
+        const snap = await db.collection("siteSettings").doc(siteId).get();
+        return snap.exists ? snap.data() : {};
+      } catch(e) { console.warn("siteSettings err", e); return {}; }
+    }
+    async function saveSiteSettings(siteId, patch) {
+      return setDoc("siteSettings", siteId, patch);
+    }
+
+    // ---- AI 작업일지 자동분류 (Anthropic API) ----
+    async function parseDailyLogWithAI(text, apiKey) {
+      const system = `당신은 건설/인테리어 현장 작업일지 정리 도우미입니다. 작업자가 자유롭게 쓴 오늘의 작업 내용을 분석해서 아래 JSON 형식으로만 응답하세요. 다른 설명, 코드블록 없이 JSON 객체만 출력합니다.
+
+{
+  "process": "공정명. 다음 목록 중 가장 가까운 것을 우선 선택하고, 적절한 것이 없으면 새로 간결하게 작성: ${PROCESS_LIST.join(", ")}",
+  "area": "작업 구역/위치 (예: 욕실, 거실, 전체)",
+  "content": "작업 내용을 1. 2. 3. 번호 목록 형태의 줄글로 정리",
+  "workers": [{"role":"역할 또는 팀명","count":인원수(숫자),"laborCost":인건비 합계 원 단위(숫자, 언급 없으면 0)}],
+  "materials": [{"name":"자재명","unit":"단위","qty":수량(숫자),"unitPrice":단가 원 단위(숫자)}],
+  "equipment": [{"name":"장비명","cost":임대비 원 단위(숫자)}],
+  "otherCosts": {"meal":식대 원 단위(숫자), "delivery":운반비 원 단위(숫자), "etc":기타비용 원 단위(숫자)},
+  "note": "특이사항이나 다음 작업 인계사항 (없으면 빈 문자열)"
+}
+
+언급되지 않은 항목은 빈 배열([]) 또는 0으로 둡니다. 금액·수량 정보가 없으면 0으로 둡니다.`;
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1500,
+          system,
+          messages: [{ role: "user", content: text }],
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(()=>"");
+        throw new Error(`API 오류 (${res.status}): ${errText.slice(0,200)}`);
+      }
+      const data = await res.json();
+      const raw = data?.content?.[0]?.text || "";
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("응답을 해석할 수 없습니다.");
+      return JSON.parse(jsonMatch[0]);
+    }
+
+    // ---- 이미지 압축 (업로드 전 리사이즈, 용량 절약) ----
+    function compressImage(file, maxDim, quality) {
+      maxDim = maxDim || 1600; quality = quality || 0.75;
+      return new Promise((resolve) => {
+        if (!file.type || !file.type.startsWith("image/")) { resolve(file); return; }
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+            else { width = Math.round(width * maxDim / height); height = maxDim; }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => {
+            URL.revokeObjectURL(url);
+            if (!blob) { resolve(file); return; }
+            const name = (file.name || "photo.jpg").replace(/\.\w+$/, ".jpg");
+            resolve(new File([blob], name, { type: "image/jpeg" }));
+          }, "image/jpeg", quality);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+        img.src = url;
+      });
+    }
   </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
-    input, button, textarea { font-family: inherit; }
+    html, body { background: #1a1a2e; }
+    body {
+      font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #f5f5f7;
+      -webkit-tap-highlight-color: transparent;
+    }
+    input, button, textarea, select { font-family: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+
+    #root { min-height: 100vh; display: flex; flex-direction: column; }
+
+    .app-header {
+      position: sticky; top: 0; z-index: 20;
+      background: #16162a;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding: 14px 16px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .app-header .title { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.2px; }
+    .app-header .subtitle { font-size: 11px; color: #9090a8; margin-top: 2px; }
+
+    .app-content {
+      flex: 1;
+      background: #f5f5f7;
+      color: #2d3748;
+      border-radius: 18px 18px 0 0;
+      min-height: 0;
+      padding-bottom: 84px;
+    }
+
+    .tabbar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+      display: flex;
+      background: #16162a;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    }
+    .tabbar button {
+      flex: 1;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      background: none; border: none; cursor: pointer;
+      padding: 6px 2px;
+      color: #6e6e8a;
+      font-size: 11px;
+      font-weight: 500;
+      border-radius: 10px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .tabbar button .ic { font-size: 19px; line-height: 1; position: relative; display: inline-block; }
+    .tabbar button.active { color: #FF6B35; background: rgba(255,107,53,0.10); }
+    .tabbar button .ic .dot {
+      position: absolute; top: -2px; right: -4px;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #FF6B35; border: 1.5px solid #16162a;
+    }
+
+    .next-process-banner {
+      margin: 10px 16px 0; padding: 10px 14px; border-radius: 12px;
+      background: linear-gradient(135deg, #FF6B35, #ff8c5a);
+      color: #fff; display: flex; align-items: center; gap: 10px;
+      font-size: 12.5px;
+    }
+    .next-process-banner .badge { font-weight: 900; font-size: 11px; background: rgba(255,255,255,0.25); border-radius: 10px; padding: 2px 8px; flex-shrink: 0; }
+    .next-process-banner .msg { flex: 1; line-height: 1.4; }
+    .next-process-banner .close { background: none; border: none; color: #fff; font-size: 16px; opacity: 0.8; cursor: pointer; padding: 0 2px; flex-shrink: 0; }
+
+    .placeholder-wrap {
+      max-width: 680px; margin: 0 auto; padding: 20px 16px 40px;
+    }
+    .placeholder-card {
+      background: #fff; border-radius: 14px; padding: 24px 18px;
+      text-align: center; border: 1px solid #e2e8f0;
+    }
+    .placeholder-card .emoji { font-size: 34px; margin-bottom: 10px; }
+    .placeholder-card h3 { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }
+    .placeholder-card p { font-size: 13px; color: #a0aec0; line-height: 1.6; }
+    .placeholder-list {
+      margin-top: 16px; text-align: left; background: #f9fafb; border-radius: 10px;
+      padding: 14px 16px; border: 1px solid #edf2f7;
+    }
+    .placeholder-list .step {
+      font-size: 12px; color: #718096; padding: 4px 0;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .placeholder-list .step b { color: #FF6B35; font-weight: 700; min-width: 18px; }
+
+    /* 토스트 알림 */
+    .toast {
+      position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%);
+      max-width: calc(100vw - 32px); z-index: 50;
+      padding: 11px 18px; border-radius: 10px; font-size: 13px; font-weight: 500;
+      color: #fff; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+      animation: toast-in 0.2s ease-out;
+    }
+    .toast-err { background: #e53e3e; }
+    .toast-ok { background: #2f855a; }
+    @keyframes toast-in { from { opacity:0; transform: translate(-50%, 10px); } to { opacity:1; transform: translate(-50%, 0); } }
+
+    /* 현장 선택 화면 */
+    .site-select-wrap {
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 24px 16px;
+      background: #1a1a2e; color: #f5f5f7;
+    }
+    .site-select-wrap h2 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .site-select-wrap .sub { font-size: 12px; color: #9090a8; margin-bottom: 20px; }
+    .site-card-list { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+    .site-card {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      background: #22223a; border: 1.5px solid rgba(255,255,255,0.08); border-radius: 12px;
+      padding: 14px 16px; cursor: pointer; text-align: left;
+    }
+    .site-card:active { background: #2a2a45; }
+    .site-card .name { font-size: 14px; font-weight: 700; color: #fff; }
+    .site-card .addr { font-size: 11px; color: #9090a8; margin-top: 2px; }
+    .site-card .del { background: none; border: none; color: #6e6e8a; font-size: 16px; cursor: pointer; padding: 4px 6px; flex-shrink: 0; }
+    .site-add-form { width: 100%; max-width: 360px; display: flex; gap: 8px; }
+    .site-add-form input {
+      flex: 1; padding: 12px 14px; font-size: 14px; border-radius: 10px;
+      border: 1.5px solid rgba(255,255,255,0.12); background: #22223a; color: #fff; outline: none;
+    }
+    .site-add-form button {
+      padding: 0 18px; border-radius: 10px; border: none; background: #FF6B35; color: #fff;
+      font-weight: 700; font-size: 14px; cursor: pointer;
+    }
+
+    /* 헤더 현장 변경 버튼 */
+    .switch-site-btn {
+      background: rgba(255,255,255,0.08); border: none; color: #c0c0d0; font-size: 11px;
+      border-radius: 8px; padding: 5px 9px; cursor: pointer; flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    /* ============================================================
+       탭 3. 체크리스트 (기존 site-checklist 앱 — 그대로 이식)
+       ============================================================ */
 
     const CATS = [
       { key: "required", label: "필수사항", color: "#e53e3e", bg: "#fff5f5", border: "#feb2b2" },
@@ -55,6 +318,7 @@
       return `${y}-${m}-${dd}`;
     };
     const today = fmtDate(new Date());
+    const tomorrow = fmtDate(new Date(Date.now() + 86400000));
     const dayLabel = (s) => {
       const days = ["일","월","화","수","목","금","토"];
       const d = new Date(s);
@@ -62,6 +326,133 @@
     };
     function lsLoad(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } }
     function lsSave(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
+    const fmtMoney = (n) => (Number(n)||0).toLocaleString("ko-KR") + "원";
+    const newId = (prefix) => prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+
+    /* ============================================================
+       현장(프로젝트) 컨텍스트 — 여러 현장을 하나의 앱에서 관리
+       ============================================================ */
+    const SiteContext = React.createContext({ siteId: null, site: null });
+
+    /* ============================================================
+       전역 토스트 알림
+       ============================================================ */
+    function ToastHost() {
+      const [toast, setToast] = useState(null);
+      useEffect(() => {
+        _notify = (msg, type) => setToast({ msg, type: type || "error", key: Date.now() });
+        return () => { _notify = () => {}; };
+      }, []);
+      useEffect(() => {
+        if (!toast) return;
+        const t = setTimeout(() => setToast(null), 3000);
+        return () => clearTimeout(t);
+      }, [toast]);
+      if (!toast) return null;
+      return <div className={"toast " + (toast.type === "success" ? "toast-ok" : "toast-err")}>{toast.msg}</div>;
+    }
+
+    // 공정표 초기 공종 목록 (4단계에서 schedule 컬렉션 연동 전까지 작업일지 공정 선택용)
+    const PROCESS_LIST = [
+      "철거", "먹매김", "판넬벽 재시공", "텍스 철거", "설비 배관", "샷시 철거", "경량벽체 (LGS)",
+      "터파기", "배관 연결", "되메우기", "하스리", "분배기", "수도설비 마무리", "조적", "인방",
+      "PF보드 단열", "벽체 컷팅", "내부 칸막이", "단열 마무리", "전기 배선 1차",
+      "욕실 방수 바탕 정리", "세탁실 방수", "샷시 시공 (거실 3400×2100)", "미장 (샷시 사춤 포함)",
+      "바닥 난방 엑셀배관 설치", "방통", "미장 양생", "방수 1차", "방수 2차", "담수 테스트 (24h 이상)",
+      "타일 (욕실·현관)", "줄눈 (욕실·현관)", "목공 (천장·문틀·몰딩)", "도장/도배", "필름",
+      "바닥재 (마루/장판)", "가구", "욕실 도기·수전", "조명·스위치", "도어",
+      "실리콘·코킹", "보양 철거", "입주 청소", "준공 점검",
+    ];
+
+    // 공정표 상태별 색상
+    const STATUS_COLOR = { done: "#a0aec0", confirmed: "#4472C4", planned: "#ED8936" };
+    const STATUS_LABEL = { done: "완료", confirmed: "확정", planned: "예정" };
+    const DELAY_COLOR = "#E53E3E";
+    // 완료되지 않았는데 종료일이 지난 작업인지 판단
+    function isDelayed(task, todayStr) {
+      return task.status !== "done" && task.endDate && task.endDate < todayStr;
+    }
+
+    function buildDateRange(start, end) {
+      const arr = [];
+      let d = new Date(start + "T00:00:00");
+      const endD = new Date(end + "T00:00:00");
+      while (d <= endD) { arr.push(fmtDate(d)); d.setDate(d.getDate()+1); }
+      return arr;
+    }
+
+    // ---- 날씨 (Open-Meteo, API 키 불필요) ----
+    // 현장: 경북 구미시 선기동
+    const SITE_LAT = 36.12;
+    const SITE_LON = 128.34;
+    const WEATHER_ICON = (code) => {
+      if (code === 0) return "☀️";
+      if (code === 1 || code === 2) return "🌤️";
+      if (code === 3) return "☁️";
+      if (code === 45 || code === 48) return "🌫️";
+      if ([51,53,55,56,57].includes(code)) return "🌦️";
+      if ([61,63,65,66,67,80,81,82].includes(code)) return "🌧️";
+      if ([71,73,75,77,85,86].includes(code)) return "❄️";
+      if ([95,96,99].includes(code)) return "⛈️";
+      return "🌡️";
+    };
+    const WEATHER_LABEL = (code) => {
+      if (code === 0) return "맑음";
+      if (code === 1 || code === 2) return "대체로 맑음";
+      if (code === 3) return "흐림";
+      if (code === 45 || code === 48) return "안개";
+      if ([51,53,55,56,57].includes(code)) return "이슬비";
+      if ([61,63,65,66,67].includes(code)) return "비";
+      if ([80,81,82].includes(code)) return "소나기";
+      if ([71,73,75,77,85,86].includes(code)) return "눈";
+      if ([95,96,99].includes(code)) return "뇌우";
+      return "-";
+    };
+    async function fetchWeather(lat, lon) {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat||SITE_LAT}&longitude=${lon||SITE_LON}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FSeoul&forecast_days=10`;
+        const res = await fetch(url);
+        const json = await res.json();
+        const map = {};
+        (json.daily?.time || []).forEach((date, i) => {
+          map[date] = {
+            code: json.daily.weathercode[i],
+            tmax: Math.round(json.daily.temperature_2m_max[i]),
+            tmin: Math.round(json.daily.temperature_2m_min[i]),
+            pop: json.daily.precipitation_probability_max[i],
+          };
+        });
+        return map;
+      } catch (e) { console.warn("weather err", e); return {}; }
+    }
+
+    // 공정표 초기 시드 데이터 (Firestore "schedule" 컬렉션이 비어있을 때 1회 생성)
+    const SCHEDULE_SEED = [
+      { id:"task_001", name:"철거 + 먹매김",                         startDate:"2026-06-02", endDate:"2026-06-02", status:"done" },
+      { id:"task_002", name:"판넬벽 재시공 + 텍스 철거",              startDate:"2026-06-03", endDate:"2026-06-04", status:"done" },
+      { id:"task_003", name:"설비 배관 + 샷시 철거",                  startDate:"2026-06-04", endDate:"2026-06-04", status:"done" },
+      { id:"task_004", name:"경량벽체 (LGS)",                        startDate:"2026-06-04", endDate:"2026-06-05", status:"done" },
+      { id:"task_005", name:"터파기 + 배관 연결",                     startDate:"2026-06-05", endDate:"2026-06-06", status:"done" },
+      { id:"task_006", name:"되메우기 + 하스리 + 분배기",             startDate:"2026-06-06", endDate:"2026-06-06", status:"done" },
+      { id:"task_007", name:"수도설비 마무리",                        startDate:"2026-06-08", endDate:"2026-06-08", status:"done" },
+      { id:"task_008", name:"조적 + 인방",                           startDate:"2026-06-09", endDate:"2026-06-10", status:"done" },
+      { id:"task_009", name:"PF보드 단열 + 벽체 컷팅",                startDate:"2026-06-09", endDate:"2026-06-12", status:"done" },
+      { id:"task_010", name:"내부 칸막이 + 단열 마무리",              startDate:"2026-06-13", endDate:"2026-06-14", status:"confirmed", note:"확정" },
+      { id:"task_011", name:"전기 배선 1차",                         startDate:"2026-06-15", endDate:"2026-06-16", status:"planned",   note:"예정" },
+      { id:"task_012", name:"욕실 방수 바탕 정리",                    startDate:"2026-06-15", endDate:"2026-06-16", status:"planned",   note:"예정" },
+      { id:"task_013", name:"샷시 시공 (거실 3400×2100)",             startDate:"2026-06-17", endDate:"2026-06-17", status:"confirmed", note:"확정" },
+      { id:"task_014", name:"미장 (샷시 사춤 포함)",                  startDate:"2026-06-18", endDate:"2026-06-19", status:"confirmed", note:"확정" },
+      { id:"task_015", name:"미장 양생 + 방수 1차",                   startDate:"2026-06-20", endDate:"2026-06-21", status:"planned",   note:"예정" },
+      { id:"task_016", name:"방수 2차 + 담수 테스트 (24h 이상)",       startDate:"2026-06-22", endDate:"2026-06-23", status:"planned",   note:"예정" },
+      { id:"task_017", name:"타일 + 줄눈 (욕실·현관)",                startDate:"2026-06-24", endDate:"2026-06-26", status:"planned",   note:"예정" },
+      { id:"task_018", name:"목공 (천장·문틀·몰딩)",                  startDate:"2026-06-29", endDate:"2026-07-03", status:"planned",   note:"예정" },
+      { id:"task_019", name:"도장/도배 + 필름",                       startDate:"2026-07-06", endDate:"2026-07-08", status:"planned",   note:"예정" },
+      { id:"task_020", name:"바닥재 (마루/장판)",                     startDate:"2026-07-09", endDate:"2026-07-10", status:"planned",   note:"예정" },
+      { id:"task_021", name:"가구 + 욕실 도기·수전",                  startDate:"2026-07-13", endDate:"2026-07-14", status:"planned",   note:"예정" },
+      { id:"task_022", name:"조명·스위치 + 도어",                     startDate:"2026-07-15", endDate:"2026-07-15", status:"planned",   note:"예정" },
+      { id:"task_023", name:"실리콘·코킹 + 보양 철거",                startDate:"2026-07-16", endDate:"2026-07-16", status:"planned",   note:"예정" },
+      { id:"task_024", name:"입주 청소 + 준공 점검",                  startDate:"2026-07-17", endDate:"2026-07-17", status:"planned",   note:"예정" },
+    ].map(t => ({ ...t, color: STATUS_COLOR[t.status] }));
 
     function ItemRow({ item, cat, onToggle, onDelete, onEdit }) {
       const [editing, setEditing] = useState(false);
@@ -141,36 +532,34 @@
       );
     }
 
-    function App() {
+    const navBtn = { background:"none", border:"1.5px solid #e2e8f0", borderRadius:6, width:28, height:28, cursor:"pointer", color:"#718096", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" };
+    const viewBtn = { padding:"5px 12px", fontSize:12, borderRadius:20, border:"1.5px solid", cursor:"pointer", color:"#2d3748" };
+
+    function ChecklistTab() {
+      const { siteId } = React.useContext(SiteContext);
       const [sites, setSites]     = useState([]);
-      const [curSite, setCurSite] = useState(null);
       const [curDate, setCurDate] = useState(today);
       const [logs, setLogs]       = useState({});
       const [view, setView]       = useState("history");
-      const [newSiteName, setNewSiteName] = useState("");
-      const [addingSite, setAddingSite]   = useState(false);
       const [inputs, setInputs]   = useState({ required:"", request:"", change:"" });
       const [syncing, setSyncing] = useState(false);
       const [lastSync, setLastSync] = useState(null);
       const [loaded, setLoaded]   = useState(false);
       const inputRefs = { required: useRef(), request: useRef(), change: useRef() };
       const syncTimer = useRef(null);
+      const curSite = siteId;
 
       useEffect(() => {
         (async () => {
           const cloud = await cloudLoad();
-          if (cloud && cloud.sites.length > 0) {
-            setSites(cloud.sites);
-            setLogs(cloud.logs);
-            setCurSite(cloud.sites[0].id);
-            lsSave("sites", cloud.sites);
-            lsSave("logs", cloud.logs);
+          if (cloud) {
+            setSites(cloud.sites || []);
+            setLogs(cloud.logs || {});
+            lsSave("sites", cloud.sites || []);
+            lsSave("logs", cloud.logs || {});
           } else {
-            const ls = lsLoad("sites") || [];
-            const ll = lsLoad("logs") || {};
-            setSites(ls);
-            setLogs(ll);
-            if (ls.length) setCurSite(ls[0].id);
+            setSites(lsLoad("sites") || []);
+            setLogs(lsLoad("logs") || {});
           }
           setLoaded(true);
         })();
@@ -186,21 +575,6 @@
           setSyncing(false);
           setLastSync(new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}));
         }, 800);
-      };
-
-      const addSite = () => {
-        const name = newSiteName.trim(); if (!name) return;
-        const id = "site_" + Date.now();
-        const ns = [...sites, { id, name, createdAt: today }];
-        setSites(ns); setCurSite(id); setNewSiteName(""); setAddingSite(false);
-        sync(ns, logs);
-      };
-      const deleteSite = (id) => {
-        if (!confirm("현장을 삭제하면 모든 일지가 사라집니다. 삭제할까요?")) return;
-        const ns = sites.filter(s => s.id !== id);
-        const nl = {...logs}; Object.keys(nl).forEach(k => { if(k.startsWith(id+"_")) delete nl[k]; });
-        setSites(ns); setLogs(nl); setCurSite(ns.length ? ns[0].id : null);
-        sync(ns, nl);
       };
 
       const logKey = curSite ? `${curSite}_${curDate}` : null;
@@ -234,28 +608,10 @@
       if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
 
       return (
-        <div style={{ fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", maxWidth:680, margin:"0 auto", padding:"16px 12px", minHeight:"100vh" }}>
+        <div style={{ maxWidth:680, margin:"0 auto", padding:"16px 12px" }}>
 
           <div style={{ textAlign:"right", fontSize:11, color:"#a0aec0", marginBottom:8 }}>
             {syncing ? "⏳ 저장 중..." : lastSync ? `✅ ${lastSync} 동기화됨` : ""}
-          </div>
-
-          <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:16 }}>
-            {sites.map(s => (
-              <div key={s.id} style={{ display:"flex", alignItems:"center", borderRadius:20, overflow:"hidden", border: curSite===s.id?"2px solid #4a5568":"1.5px solid #e2e8f0", background: curSite===s.id?"#edf2f7":"transparent" }}>
-                <button onClick={() => { setCurSite(s.id); setView("history"); }} style={{ padding:"6px 14px", fontSize:13, fontWeight:curSite===s.id?500:400, background:"none", border:"none", cursor:"pointer", color:"#2d3748" }}>{s.name}</button>
-                <button onClick={() => deleteSite(s.id)} style={{ padding:"4px 8px 4px 0", background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:13 }}>×</button>
-              </div>
-            ))}
-            {addingSite ? (
-              <div style={{ display:"flex", gap:4 }}>
-                <input value={newSiteName} onChange={e=>setNewSiteName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSite()} placeholder="현장명 입력" style={{ padding:"5px 10px", fontSize:13, borderRadius:20, border:"1.5px solid #cbd5e0", outline:"none", width:120 }} autoFocus />
-                <button onClick={addSite} style={{ padding:"5px 12px", fontSize:12, borderRadius:20, background:"#2d3748", color:"#fff", border:"none", cursor:"pointer" }}>추가</button>
-                <button onClick={()=>setAddingSite(false)} style={{ padding:"5px 10px", fontSize:12, borderRadius:20, background:"none", border:"1.5px solid #e2e8f0", cursor:"pointer", color:"#718096" }}>취소</button>
-              </div>
-            ) : (
-              <button onClick={()=>setAddingSite(true)} style={{ padding:"6px 14px", fontSize:13, borderRadius:20, border:"1.5px dashed #cbd5e0", background:"none", cursor:"pointer", color:"#a0aec0" }}>+ 현장 추가</button>
-            )}
           </div>
 
           {!curSite ? (
@@ -317,8 +673,1768 @@
       );
     }
 
-    const navBtn = { background:"none", border:"1.5px solid #e2e8f0", borderRadius:6, width:28, height:28, cursor:"pointer", color:"#718096", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" };
-    const viewBtn = { padding:"5px 12px", fontSize:12, borderRadius:20, border:"1.5px solid", cursor:"pointer", color:"#2d3748" };
+    /* ============================================================
+       탭 1, 2, 4, 5 — 준비 중 (다음 단계에서 구현 예정)
+       ============================================================ */
+
+    function PlaceholderTab({ emoji, title, desc, steps }) {
+      return (
+        <div className="placeholder-wrap">
+          <div className="placeholder-card">
+            <div className="emoji">{emoji}</div>
+            <h3>{title}</h3>
+            <p>{desc}</p>
+            {steps && (
+              <div className="placeholder-list">
+                {steps.map((s, i) => (
+                  <div className="step" key={i}><b>{i+1}</b><span>{s}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const GANTT_COL_W = 34;
+    const GANTT_NAME_W = 132;
+
+    function ScheduleTab() {
+      const { siteId } = React.useContext(SiteContext);
+      const [tasks, setTasks] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [weather, setWeather] = useState({});
+      const [adding, setAdding] = useState(false);
+      const [addForm, setAddForm] = useState({ name:"", startDate: today, endDate: today, status:"planned" });
+      const [editingId, setEditingId] = useState(null);
+      const [editForm, setEditForm] = useState(null);
+      const [view, setView] = useState("calendar"); // "gantt" | "calendar"
+      const [calMonth, setCalMonth] = useState(today.slice(0,7)); // "YYYY-MM"
+      const [selectedDay, setSelectedDay] = useState(null);
+
+      useEffect(() => {
+        (async () => {
+          let data = await fetchCollection("schedule", siteId);
+          if (data.length === 0) {
+            for (const t of SCHEDULE_SEED) await setDoc("schedule", `${siteId}_${t.id}`, { ...t, siteId });
+            data = SCHEDULE_SEED.map(t => ({ ...t, id: `${siteId}_${t.id}`, siteId }));
+          }
+          setTasks(data);
+          setLoaded(true);
+        })();
+        (async () => {
+          const settings = await getSiteSettings(siteId);
+          setWeather(await fetchWeather(settings?.lat, settings?.lon));
+        })();
+      }, [siteId]);
+
+      const sorted = useMemo(() => [...tasks].sort((a,b) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id)), [tasks]);
+
+      // 작업 데이터 기반 동적 날짜 범위 (오늘 기준 -3일 ~ +14일을 기본으로 포함)
+      const dateRange = useMemo(() => {
+        let minD = today, maxD = today;
+        const pad = (d, days) => { const dt = new Date(d + "T00:00:00"); dt.setDate(dt.getDate()+days); return fmtDate(dt); };
+        tasks.forEach(t => {
+          if (t.startDate && t.startDate < minD) minD = t.startDate;
+          if (t.endDate && t.endDate > maxD) maxD = t.endDate;
+        });
+        return buildDateRange(pad(minD, -3), pad(maxD, 14));
+      }, [tasks]);
+
+      const doneCount = tasks.filter(t => t.status === "done").length;
+      const progress = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
+      const nextTask = sorted.find(t => t.status !== "done" && t.startDate >= today)
+                    || sorted.find(t => t.status !== "done");
+
+      const toggleDone = async (task) => {
+        let patch;
+        if (task.status === "done") {
+          const prev = task.prevStatus || "confirmed";
+          patch = { status: prev, color: STATUS_COLOR[prev] };
+        } else {
+          patch = { status: "done", color: STATUS_COLOR.done, prevStatus: task.status };
+        }
+        setTasks(ts => ts.map(t => t.id === task.id ? { ...t, ...patch } : t));
+        await setDoc("schedule", task.id, patch);
+      };
+
+      const addTask = async () => {
+        const name = addForm.name.trim();
+        if (!name) return;
+        const id = newId("task");
+        const data = {
+          name, startDate: addForm.startDate, endDate: addForm.endDate || addForm.startDate,
+          status: addForm.status, color: STATUS_COLOR[addForm.status], siteId,
+        };
+        setTasks(ts => [...ts, { id, ...data }]);
+        setAddForm({ name:"", startDate: today, endDate: today, status:"planned" });
+        setAdding(false);
+        await setDoc("schedule", id, data);
+      };
+
+      const startEdit = (task) => {
+        setEditingId(task.id);
+        setEditForm({ name: task.name, startDate: task.startDate, endDate: task.endDate, status: task.status });
+      };
+      const saveEdit = async () => {
+        const patch = {
+          name: editForm.name.trim() || tasks.find(t=>t.id===editingId).name,
+          startDate: editForm.startDate, endDate: editForm.endDate || editForm.startDate,
+          status: editForm.status, color: STATUS_COLOR[editForm.status],
+        };
+        setTasks(ts => ts.map(t => t.id === editingId ? { ...t, ...patch } : t));
+        await setDoc("schedule", editingId, patch);
+        setEditingId(null); setEditForm(null);
+      };
+      const removeTask = async (id) => {
+        if (!confirm("이 공정을 삭제할까요?")) return;
+        setTasks(ts => ts.filter(t => t.id !== id));
+        await deleteDocFn("schedule", id);
+      };
+
+      if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
+
+      return (
+        <div className="placeholder-wrap">
+          <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+            <div style={{ flex:1, background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
+              <div style={{ fontSize:12, color:"#a0aec0" }}>전체 진행률</div>
+              <div style={{ fontSize:22, fontWeight:900, color:"#1a1a2e" }}>{progress}%</div>
+              <div style={{ marginTop:6, height:6, borderRadius:4, background:"#edf2f7", overflow:"hidden" }}>
+                <div style={{ width:`${progress}%`, height:"100%", background:"#FF6B35", borderRadius:4 }} />
+              </div>
+              <div style={{ fontSize:11, color:"#a0aec0", marginTop:4 }}>{doneCount} / {tasks.length} 공종 완료</div>
+            </div>
+          </div>
+
+          {nextTask && (
+            <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"10px 14px", marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:11, fontWeight:700, color:"#fff", background:"#FF6B35", borderRadius:12, padding:"3px 9px" }}>다음 공정</span>
+              <span style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>{nextTask.name}</span>
+              <span style={{ fontSize:12, color:"#a0aec0", marginLeft:"auto" }}>{dayLabel(nextTask.startDate)}{nextTask.startDate!==nextTask.endDate ? ` ~ ${dayLabel(nextTask.endDate)}` : ""}</span>
+            </div>
+          )}
+
+          {Object.keys(weather).length > 0 && (
+            <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"10px 14px", marginBottom:10 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>현장 날씨</div>
+              <div style={{ display:"flex", gap:8, overflowX:"auto" }}>
+                {dateRange.filter(d => weather[d]).slice(0, 7).map(d => {
+                  const w = weather[d];
+                  const isToday = d === today;
+                  return (
+                    <div key={d} style={{
+                      flex:"0 0 auto", minWidth:56, textAlign:"center", padding:"6px 4px", borderRadius:8,
+                      background: isToday ? "#FFF3CD" : "#f7f8fa",
+                    }}>
+                      <div style={{ fontSize:10, color:"#a0aec0", fontWeight: isToday?900:500 }}>{isToday ? "오늘" : dayLabel(d).split(" ")[1]}</div>
+                      <div style={{ fontSize:20, margin:"2px 0" }}>{WEATHER_ICON(w.code)}</div>
+                      <div style={{ fontSize:11, color:"#4a5568" }}>{w.tmin}° / {w.tmax}°</div>
+                      {w.pop > 0 && <div style={{ fontSize:10, color:"#4472C4" }}>💧{w.pop}%</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display:"flex", gap:10, marginBottom:10, fontSize:11, color:"#718096", flexWrap:"wrap", alignItems:"center" }}>
+            {Object.entries(STATUS_LABEL).map(([k,label]) => (
+              <div key={k} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <span style={{ width:12, height:12, borderRadius:3, background:STATUS_COLOR[k], display:"inline-block" }} />
+                {label}
+              </div>
+            ))}
+            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <span style={{ width:12, height:12, borderRadius:3, border:`2px solid ${DELAY_COLOR}`, display:"inline-block" }} />
+              지연
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <span style={{ width:12, height:12, borderRadius:3, background:"#FFE9A8", border:"1px solid #FFC107", display:"inline-block" }} />
+              오늘
+            </div>
+            <div style={{ marginLeft:"auto", display:"flex", gap:4 }}>
+              <button onClick={()=>setView("gantt")} style={{
+                border:"1px solid #e2e8f0", borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer",
+                background: view==="gantt" ? "#FF6B35" : "#fff", color: view==="gantt" ? "#fff" : "#718096",
+              }}>간트</button>
+              <button onClick={()=>setView("calendar")} style={{
+                border:"1px solid #e2e8f0", borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer",
+                background: view==="calendar" ? "#FF6B35" : "#fff", color: view==="calendar" ? "#fff" : "#718096",
+              }}>달력</button>
+            </div>
+            <button onClick={()=>{ setAdding(a=>!a); setEditingId(null); }} style={{ background:"none", border:"none", color:"#FF6B35", fontSize:12, fontWeight:700, cursor:"pointer" }}>{adding ? "닫기" : "+ 공정 추가"}</button>
+          </div>
+
+          {adding && (
+            <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>새 공정 추가</div>
+              <input value={addForm.name} onChange={e=>setAddForm(f=>({...f,name:e.target.value}))} placeholder="공정명" style={{...dl.input, marginBottom:6}} />
+              <div style={dl.row}>
+                <input type="date" value={addForm.startDate} onChange={e=>setAddForm(f=>({...f,startDate:e.target.value}))} style={{...dl.input, flex:1}} />
+                <span style={{ color:"#a0aec0" }}>~</span>
+                <input type="date" value={addForm.endDate} onChange={e=>setAddForm(f=>({...f,endDate:e.target.value}))} style={{...dl.input, flex:1}} />
+              </div>
+              <select value={addForm.status} onChange={e=>setAddForm(f=>({...f,status:e.target.value}))} style={{...dl.input, marginBottom:8}}>
+                {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+              <button onClick={addTask} style={{ ...dl.primaryBtn, padding:"10px 0", fontSize:13 }}>추가</button>
+            </div>
+          )}
+
+          {editingId && editForm && (
+            <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>공정 수정</div>
+              <input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} placeholder="공정명" style={{...dl.input, marginBottom:6}} />
+              <div style={dl.row}>
+                <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value}))} style={{...dl.input, flex:1}} />
+                <span style={{ color:"#a0aec0" }}>~</span>
+                <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate:e.target.value}))} style={{...dl.input, flex:1}} />
+              </div>
+              <select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} style={{...dl.input, marginBottom:8}}>
+                {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={()=>{ setEditingId(null); setEditForm(null); }} style={dl.secondaryBtn}>취소</button>
+                <button onClick={saveEdit} style={{ ...dl.primaryBtn, padding:"10px 0", fontSize:13 }}>저장</button>
+              </div>
+            </div>
+          )}
+
+          {view === "gantt" && (
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", overflow:"hidden" }}>
+            <div style={{ overflowX:"auto" }}>
+              <div style={{ minWidth: GANTT_NAME_W + dateRange.length * GANTT_COL_W }}>
+
+                {/* 날짜 헤더 */}
+                <div style={{ display:"flex", borderBottom:"1px solid #e2e8f0" }}>
+                  <div style={{ width:GANTT_NAME_W, flexShrink:0, position:"sticky", left:0, background:"#fff", zIndex:2, borderRight:"1px solid #e2e8f0" }} />
+                  {dateRange.map(d => {
+                    const dt = new Date(d + "T00:00:00");
+                    const dow = dt.getDay();
+                    const isToday = d === today;
+                    return (
+                      <div key={d} style={{
+                        width:GANTT_COL_W, flexShrink:0, textAlign:"center", padding:"6px 0",
+                        background: isToday ? "#FFE9A8" : (dow===0 ? "#fff5f5" : dow===6 ? "#ebf8ff" : "transparent"),
+                        borderLeft: isToday ? "2px solid #FFC107" : "none",
+                        borderRight: isToday ? "2px solid #FFC107" : "none",
+                      }}>
+                        <div style={{ fontSize:11, fontWeight:isToday?900:500, color: isToday?"#b7791f":(dow===0?"#e53e3e":dow===6?"#2b6cb0":"#4a5568") }}>{d.slice(5).replace("-","/")}</div>
+                        <div style={{ fontSize:9, color:"#a0aec0" }}>{["일","월","화","수","목","금","토"][dow]}</div>
+                        {weather[d] && <div style={{ fontSize:11, lineHeight:1 }} title={WEATHER_LABEL(weather[d].code)}>{WEATHER_ICON(weather[d].code)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 작업 행 */}
+                {sorted.map(task => {
+                  const startIdx = dateRange.indexOf(task.startDate);
+                  const endIdx = dateRange.indexOf(task.endDate);
+                  const s = startIdx < 0 ? 0 : startIdx;
+                  const e = endIdx < 0 ? s : endIdx;
+                  const delayed = isDelayed(task, today);
+                  return (
+                    <div key={task.id} style={{ display:"flex", alignItems:"center", height:40, borderBottom:"1px solid #f0f0f3" }}>
+                      <div style={{
+                        width:GANTT_NAME_W, flexShrink:0, position:"sticky", left:0, background:"#fff", zIndex:2,
+                        borderRight:"1px solid #e2e8f0", padding:"0 4px 0 8px", fontSize:11.5, fontWeight:500,
+                        color: task.status==="done" ? "#a0aec0" : "#2d3748",
+                        display:"flex", alignItems:"center", gap:2,
+                      }}>
+                        {delayed && <span title="지연" style={{ fontSize:11, flexShrink:0 }}>⚠️</span>}
+                        <span style={{
+                          flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                          textDecoration: task.status==="done" ? "line-through" : "none",
+                          color: delayed ? DELAY_COLOR : "inherit",
+                        }} title={task.name}>{task.name}</span>
+                        <button onClick={()=>{ startEdit(task); setAdding(false); }} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:11, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>✏️</button>
+                        <button onClick={()=>removeTask(task.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>×</button>
+                      </div>
+                      <div style={{ position:"relative", height:"100%", flex:`0 0 ${dateRange.length * GANTT_COL_W}px` }}>
+                        {dateRange.map((d,i) => d===today && (
+                          <div key={d} style={{ position:"absolute", left:i*GANTT_COL_W, top:0, bottom:0, width:GANTT_COL_W, background:"#FFF3CD", zIndex:0 }} />
+                        ))}
+                        <button
+                          onClick={() => toggleDone(task)}
+                          title={delayed ? "지연됨 · 터치하여 완료 처리" : "터치하여 완료 처리"}
+                          style={{
+                            position:"absolute", zIndex:1,
+                            left: s*GANTT_COL_W + 2, top:6, bottom:6,
+                            width: (e-s+1)*GANTT_COL_W - 4,
+                            borderRadius:6, cursor:"pointer",
+                            border: delayed ? `2px solid ${DELAY_COLOR}` : "none",
+                            background: task.color || STATUS_COLOR[task.status] || STATUS_COLOR.planned,
+                            color:"#fff", fontSize:11, fontWeight:700,
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            opacity: task.status==="done" ? 0.55 : 1,
+                          }}
+                        >{task.status==="done" ? "✓ 완료" : (delayed ? "⚠️ 지연" : "")}</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          )}
+          {view === "gantt" && (
+          <div style={{ fontSize:11, color:"#a0aec0", marginTop:8, textAlign:"center" }}>좌우로 스크롤하여 전체 공정을 확인하세요 · 공정 막대를 터치하면 완료 처리됩니다</div>
+          )}
+
+          {view === "calendar" && (
+            <CalendarView
+              tasks={tasks}
+              calMonth={calMonth}
+              setCalMonth={setCalMonth}
+              selectedDay={selectedDay}
+              setSelectedDay={setSelectedDay}
+              today={today}
+              toggleDone={toggleDone}
+              startEdit={(t)=>{ startEdit(t); setAdding(false); }}
+              removeTask={removeTask}
+            />
+          )}
+        </div>
+      );
+    }
+
+    /* ---- 공정표 달력 뷰 ---- */
+    function CalendarView({ tasks, calMonth, setCalMonth, selectedDay, setSelectedDay, today, toggleDone, startEdit, removeTask }) {
+      const [y, m] = calMonth.split("-").map(Number);
+
+      const tasksByDate = useMemo(() => {
+        const map = {};
+        tasks.forEach(t => {
+          buildDateRange(t.startDate, t.endDate || t.startDate).forEach(d => {
+            (map[d] = map[d] || []).push(t);
+          });
+        });
+        return map;
+      }, [tasks]);
+
+      const cells = useMemo(() => {
+        const first = new Date(y, m - 1, 1);
+        const startDow = first.getDay();
+        const daysInMonth = new Date(y, m, 0).getDate();
+        const arr = [];
+        for (let i = 0; i < startDow; i++) arr.push(null);
+        for (let d = 1; d <= daysInMonth; d++) arr.push(fmtDate(new Date(y, m - 1, d)));
+        while (arr.length % 7 !== 0) arr.push(null);
+        return arr;
+      }, [y, m]);
+
+      const shiftMonth = (delta) => {
+        const dt = new Date(y, m - 1 + delta, 1);
+        setCalMonth(`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`);
+        setSelectedDay(null);
+      };
+
+      const selTasks = selectedDay ? (tasksByDate[selectedDay] || []) : [];
+
+      return (
+        <div>
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"10px 12px", marginBottom:10 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+              <button onClick={()=>shiftMonth(-1)} style={{ background:"none", border:"none", fontSize:18, color:"#718096", cursor:"pointer", padding:"4px 10px" }}>‹</button>
+              <div style={{ fontSize:14, fontWeight:700, color:"#1a1a2e" }}>{y}년 {m}월</div>
+              <button onClick={()=>shiftMonth(1)} style={{ background:"none", border:"none", fontSize:18, color:"#718096", cursor:"pointer", padding:"4px 10px" }}>›</button>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3 }}>
+              {["일","월","화","수","목","금","토"].map((d,i) => (
+                <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color: i===0?"#e53e3e":i===6?"#2b6cb0":"#a0aec0", padding:"2px 0" }}>{d}</div>
+              ))}
+              {cells.map((d, i) => {
+                if (!d) return <div key={i} />;
+                const dow = new Date(d + "T00:00:00").getDay();
+                const dayTasks = tasksByDate[d] || [];
+                const isToday = d === today;
+                const isSel = d === selectedDay;
+                return (
+                  <div key={d} onClick={()=>setSelectedDay(isSel ? null : d)} style={{
+                    minHeight:62, borderRadius:8, padding:"3px 3px", cursor:"pointer",
+                    border: isToday ? "2px solid #FFC107" : "1px solid #f0f0f3",
+                    background: isSel ? "#FFF3E0" : (isToday ? "#FFF8E8" : "#fff"),
+                  }}>
+                    <div style={{ fontSize:11, fontWeight: isToday?900:500, color: dow===0?"#e53e3e":dow===6?"#2b6cb0":"#4a5568" }}>{Number(d.slice(8))}</div>
+                    {dayTasks.slice(0,3).map(t => (
+                      <div key={t.id} style={{
+                        fontSize:9, marginTop:2, padding:"1px 4px", borderRadius:4,
+                        background: t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned, color:"#fff",
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                        textDecoration: t.status==="done" ? "line-through" : "none", opacity: t.status==="done"?0.6:1,
+                        border: isDelayed(t, today) ? `1px solid ${DELAY_COLOR}` : "none",
+                      }} title={t.name}>{isDelayed(t, today) ? "⚠️ " : ""}{t.name}</div>
+                    ))}
+                    {dayTasks.length > 3 && <div style={{ fontSize:9, color:"#a0aec0", marginTop:1 }}>+{dayTasks.length-3}개</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {selectedDay && (
+            <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>{dayLabel(selectedDay)}</div>
+              {selTasks.length === 0 ? (
+                <div style={{ fontSize:12, color:"#a0aec0" }}>등록된 공정이 없습니다</div>
+              ) : selTasks.map(t => (
+                <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #f0f0f3" }}>
+                  <span style={{
+                    fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0,
+                    background: t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned,
+                  }}>{STATUS_LABEL[t.status]}</span>
+                  {isDelayed(t, today) && (
+                    <span style={{ fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0, background:DELAY_COLOR }}>⚠️ 지연</span>
+                  )}
+                  <span style={{
+                    flex:1, fontSize:13, color: t.status==="done" ? "#a0aec0" : "#2d3748",
+                    textDecoration: t.status==="done" ? "line-through" : "none",
+                  }}>{t.name}</span>
+                  <button onClick={()=>toggleDone(t)} title="완료 토글" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:14, cursor:"pointer" }}>✓</button>
+                  <button onClick={()=>startEdit(t)} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer" }}>✏️</button>
+                  <button onClick={()=>removeTask(t.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:15, cursor:"pointer" }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ---- 탭 2. 작업일지 ---- */
+
+    const dl = {
+      card: { background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:14, marginBottom:10 },
+      label: { fontSize:12, fontWeight:700, color:"#4a5568", marginBottom:6, display:"block" },
+      input: { width:"100%", padding:"10px 12px", fontSize:14, borderRadius:8, border:"1.5px solid #e2e8f0", outline:"none", background:"#fff", color:"#2d3748" },
+      row: { display:"flex", gap:6, marginBottom:6, alignItems:"center" },
+      sectionTitle: { fontSize:14, fontWeight:700, color:"#1a1a2e", marginBottom:8, display:"flex", alignItems:"center", gap:6 },
+      smallBtn: { background:"none", border:"1.5px dashed #cbd5e0", borderRadius:8, padding:"6px 12px", fontSize:12, color:"#a0aec0", cursor:"pointer" },
+      removeBtn: { background:"none", border:"none", color:"#e53e3e", fontSize:18, cursor:"pointer", flexShrink:0, padding:"0 4px" },
+      primaryBtn: { background:"#FF6B35", color:"#fff", border:"none", borderRadius:10, padding:"13px 0", fontSize:15, fontWeight:700, cursor:"pointer", width:"100%" },
+      secondaryBtn: { background:"none", border:"1.5px solid #e2e8f0", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:500, cursor:"pointer", color:"#718096", width:"100%" },
+    };
+
+    const emptyForm = () => ({
+      id: null,
+      date: today,
+      process: "",
+      processCustom: "",
+      area: "",
+      content: "",
+      workers: [{ role: "", count: 1, laborCost: 0 }],
+      materials: [{ name: "", unit: "", qty: 0, unitPrice: 0 }],
+      equipment: [{ name: "", cost: 0 }],
+      otherCosts: { meal: 0, delivery: 0, etc: 0 },
+      note: "",
+      photos: [],
+    });
+
+    function calcTotal(f) {
+      const workers = (f.workers||[]).reduce((s,w) => s + (Number(w.laborCost)||0), 0);
+      const materials = (f.materials||[]).reduce((s,m) => s + (Number(m.qty)||0) * (Number(m.unitPrice)||0), 0);
+      const equipment = (f.equipment||[]).reduce((s,e) => s + (Number(e.cost)||0), 0);
+      const other = (Number(f.otherCosts?.meal)||0) + (Number(f.otherCosts?.delivery)||0) + (Number(f.otherCosts?.etc)||0);
+      return workers + materials + equipment + other;
+    }
+
+    function DailyLogTab() {
+      const { siteId } = React.useContext(SiteContext);
+      const [logs, setLogs] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [view, setView] = useState("list"); // list | form
+      const [form, setForm] = useState(emptyForm());
+      const [filterProcess, setFilterProcess] = useState("");
+      const [saving, setSaving] = useState(false);
+      const [removedPhotos, setRemovedPhotos] = useState([]);
+      const [gallery, setGallery] = useState(null); // { photos:[{url|previewUrl}], index } | null
+      const [apiKey, setApiKey] = useState("");
+      const [aiText, setAiText] = useState("");
+      const [aiLoading, setAiLoading] = useState(false);
+
+      useEffect(() => {
+        (async () => {
+          const [data, settings] = await Promise.all([fetchCollection("dailyLogs", siteId), getSiteSettings(siteId)]);
+          setLogs(data);
+          setApiKey(settings?.anthropicApiKey || "");
+          setLoaded(true);
+        })();
+      }, [siteId]);
+
+      const runAIParse = async () => {
+        if (!aiText.trim()) return;
+        if (!apiKey) { notify("설정 탭에서 Anthropic API 키를 먼저 등록해주세요."); return; }
+        setAiLoading(true);
+        try {
+          const result = await parseDailyLogWithAI(aiText.trim(), apiKey);
+          setForm(f => {
+            const matched = PROCESS_LIST.includes(result.process);
+            return {
+              ...f,
+              process: matched ? result.process : "__custom__",
+              processCustom: !matched && result.process ? result.process : f.processCustom,
+              area: result.area || f.area,
+              content: result.content || f.content,
+              workers: (result.workers && result.workers.length) ? result.workers.map(w => ({ role: w.role||"", count: Number(w.count)||1, laborCost: Number(w.laborCost)||0 })) : f.workers,
+              materials: (result.materials && result.materials.length) ? result.materials.map(m => ({ name: m.name||"", unit: m.unit||"", qty: Number(m.qty)||0, unitPrice: Number(m.unitPrice)||0 })) : f.materials,
+              equipment: (result.equipment && result.equipment.length) ? result.equipment.map(e => ({ name: e.name||"", cost: Number(e.cost)||0 })) : f.equipment,
+              otherCosts: result.otherCosts ? { meal: Number(result.otherCosts.meal)||0, delivery: Number(result.otherCosts.delivery)||0, etc: Number(result.otherCosts.etc)||0 } : f.otherCosts,
+              note: result.note || f.note,
+            };
+          });
+          notify("AI가 내용을 분류해 채웠습니다. 확인 후 저장해주세요.", "success");
+        } catch(e) {
+          console.warn("AI parse err", e);
+          notify("AI 분석에 실패했습니다: " + e.message);
+        } finally {
+          setAiLoading(false);
+        }
+      };
+
+      const sorted = [...logs].sort((a,b) => b.date.localeCompare(a.date) || (b.id||"").localeCompare(a.id||""));
+      const processOptions = [...new Set(logs.map(l => l.process).filter(Boolean))];
+      const filtered = filterProcess ? sorted.filter(l => l.process === filterProcess) : sorted;
+      const grandTotal = logs.reduce((s,l) => s + (Number(l.totalCost)||0), 0);
+
+      const openNew = () => { setForm(emptyForm()); setRemovedPhotos([]); setView("form"); };
+
+      const addPhotos = (files) => {
+        const items = Array.from(files).map(file => ({ file, previewUrl: URL.createObjectURL(file) }));
+        setForm(f => ({ ...f, photos: [...(f.photos||[]), ...items] }));
+      };
+      const removePhoto = (idx) => {
+        setForm(f => {
+          const target = f.photos[idx];
+          if (target.url) setRemovedPhotos(rp => [...rp, target.url]);
+          if (target.previewUrl) URL.revokeObjectURL(target.previewUrl);
+          return { ...f, photos: f.photos.filter((_,i) => i!==idx) };
+        });
+      };
+      const openEdit = (log) => {
+        setForm({
+          ...emptyForm(),
+          ...log,
+          workers: log.workers?.length ? log.workers : emptyForm().workers,
+          materials: log.materials?.length ? log.materials : emptyForm().materials,
+          equipment: log.equipment?.length ? log.equipment : emptyForm().equipment,
+          otherCosts: { meal:0, delivery:0, etc:0, ...(log.otherCosts||{}) },
+          photos: (log.photos||[]).map(url => ({ url })),
+        });
+        setRemovedPhotos([]);
+        setView("form");
+      };
+
+      const updateArr = (key, idx, field, value) => {
+        setForm(f => ({ ...f, [key]: f[key].map((row,i) => i===idx ? { ...row, [field]: value } : row) }));
+      };
+      const addRow = (key, blank) => setForm(f => ({ ...f, [key]: [...f[key], blank] }));
+      const removeRow = (key, idx) => setForm(f => ({ ...f, [key]: f[key].filter((_,i) => i!==idx) }));
+
+      const save = async () => {
+        const process = form.process === "__custom__" ? form.processCustom.trim() : form.process;
+        if (!process) { alert("공정을 선택하거나 입력해주세요."); return; }
+        const id = form.id || newId("log");
+        const totalCost = calcTotal(form);
+        setSaving(true);
+
+        // 새로 추가된 사진은 압축 후 업로드, 삭제된 사진은 Storage에서 제거
+        const photoUrls = [];
+        for (const p of (form.photos||[])) {
+          if (p.url) photoUrls.push(p.url);
+          else if (p.file) {
+            try {
+              const compressed = await compressImage(p.file);
+              photoUrls.push(await uploadPhoto(compressed, `dailyLogs/${siteId}/${id}`));
+            }
+            catch(e) { console.warn("upload err", e); notify("사진 업로드에 실패했습니다."); }
+          }
+        }
+        for (const url of removedPhotos) deletePhoto(url);
+
+        const data = {
+          siteId,
+          date: form.date,
+          process,
+          area: form.area,
+          content: form.content,
+          workers: form.workers.filter(w => w.role.trim()),
+          materials: form.materials.filter(m => m.name.trim()),
+          equipment: form.equipment.filter(e => e.name.trim()),
+          otherCosts: form.otherCosts,
+          note: form.note,
+          totalCost,
+          photos: photoUrls,
+        };
+        await setDoc("dailyLogs", id, data);
+        setSaving(false);
+        setLogs(prev => {
+          const exists = prev.some(l => l.id === id);
+          return exists ? prev.map(l => l.id===id ? { id, ...data } : l) : [...prev, { id, ...data }];
+        });
+        setView("list");
+      };
+
+      const removeLog = async (id) => {
+        if (!confirm("이 작업일지를 삭제할까요?")) return;
+        await deleteDocFn("dailyLogs", id);
+        setLogs(prev => prev.filter(l => l.id !== id));
+      };
+
+      if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
+
+      if (view === "form") {
+        return (
+          <>
+          <div className="placeholder-wrap">
+            <div style={dl.sectionTitle}>{form.id ? "작업일지 수정" : "새 작업일지"}</div>
+
+            <div style={dl.card}>
+              <div style={dl.sectionTitle}>✨ AI 자동분류</div>
+              <div style={{ fontSize:11, color:"#a0aec0", marginBottom:8 }}>오늘 작업 내용을 줄글로 쓰면 AI가 공정·작업구역·인원·자재·장비·비용을 분석해서 아래 항목에 자동으로 채워줍니다. 채워진 내용은 확인 후 필요하면 수정해서 저장하세요.</div>
+              <textarea value={aiText} onChange={e=>setAiText(e.target.value)} placeholder="예: 오늘은 현장소장 외 2명이 화장실 조적 작업을 했고, 조적팀 3명 투입했어. 자재로 시멘트 10포대 80,000원 구매했고 식대 2만원 썼어." rows={4} style={{...dl.input, resize:"vertical", marginBottom:8}} />
+              <button onClick={runAIParse} disabled={aiLoading || !aiText.trim()} style={{ ...dl.primaryBtn, padding:"11px 0", fontSize:14, opacity: (aiLoading || !aiText.trim()) ? 0.6 : 1 }}>{aiLoading ? "분석 중..." : "AI로 자동 분류"}</button>
+              {!apiKey && <div style={{ fontSize:11, color:"#e53e3e", marginTop:6 }}>설정 탭에서 Anthropic API 키를 등록하면 사용할 수 있습니다.</div>}
+            </div>
+
+            <div style={dl.card}>
+              <label style={dl.label}>날짜</label>
+              <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{...dl.input, marginBottom:10}} />
+
+              <label style={dl.label}>공정</label>
+              <select value={form.process} onChange={e=>setForm(f=>({...f,process:e.target.value}))} style={{...dl.input, marginBottom:10}}>
+                <option value="">공정 선택...</option>
+                {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                <option value="__custom__">직접 입력...</option>
+              </select>
+              {form.process === "__custom__" && (
+                <input value={form.processCustom} onChange={e=>setForm(f=>({...f,processCustom:e.target.value}))} placeholder="공정명 입력" style={{...dl.input, marginBottom:10}} />
+              )}
+
+              <label style={dl.label}>작업구역</label>
+              <input value={form.area} onChange={e=>setForm(f=>({...f,area:e.target.value}))} placeholder="예: 욕실, 거실, 전체" style={{...dl.input, marginBottom:10}} />
+
+              <label style={dl.label}>작업내용</label>
+              <textarea value={form.content} onChange={e=>setForm(f=>({...f,content:e.target.value}))} placeholder="오늘 진행한 작업 내용" rows={3} style={{...dl.input, resize:"vertical"}} />
+            </div>
+
+            <div style={dl.card}>
+              <div style={dl.sectionTitle}>👷 투입인원</div>
+              {form.workers.map((w,i) => (
+                <div key={i} style={dl.row}>
+                  <input value={w.role} onChange={e=>updateArr("workers",i,"role",e.target.value)} placeholder="역할(예: 목수)" style={{...dl.input, flex:2}} />
+                  <input type="number" value={w.count} onChange={e=>updateArr("workers",i,"count",e.target.value)} placeholder="인원" style={{...dl.input, flex:1}} />
+                  <input type="number" value={w.laborCost} onChange={e=>updateArr("workers",i,"laborCost",e.target.value)} placeholder="인건비(합계)" style={{...dl.input, flex:2}} />
+                  <button onClick={()=>removeRow("workers",i)} style={dl.removeBtn}>×</button>
+                </div>
+              ))}
+              <button style={dl.smallBtn} onClick={()=>addRow("workers",{role:"",count:1,laborCost:0})}>+ 인원 추가</button>
+            </div>
+
+            <div style={dl.card}>
+              <div style={dl.sectionTitle}>📦 자재</div>
+              {form.materials.map((m,i) => (
+                <div key={i} style={dl.row}>
+                  <input value={m.name} onChange={e=>updateArr("materials",i,"name",e.target.value)} placeholder="자재명" style={{...dl.input, flex:2}} />
+                  <input value={m.unit} onChange={e=>updateArr("materials",i,"unit",e.target.value)} placeholder="단위" style={{...dl.input, flex:1}} />
+                  <input type="number" value={m.qty} onChange={e=>updateArr("materials",i,"qty",e.target.value)} placeholder="수량" style={{...dl.input, flex:1}} />
+                  <input type="number" value={m.unitPrice} onChange={e=>updateArr("materials",i,"unitPrice",e.target.value)} placeholder="단가" style={{...dl.input, flex:1}} />
+                  <button onClick={()=>removeRow("materials",i)} style={dl.removeBtn}>×</button>
+                </div>
+              ))}
+              <button style={dl.smallBtn} onClick={()=>addRow("materials",{name:"",unit:"",qty:0,unitPrice:0})}>+ 자재 추가</button>
+            </div>
+
+            <div style={dl.card}>
+              <div style={dl.sectionTitle}>🛠 장비</div>
+              {form.equipment.map((e2,i) => (
+                <div key={i} style={dl.row}>
+                  <input value={e2.name} onChange={e=>updateArr("equipment",i,"name",e.target.value)} placeholder="장비명(예: 리프트)" style={{...dl.input, flex:2}} />
+                  <input type="number" value={e2.cost} onChange={e=>updateArr("equipment",i,"cost",e.target.value)} placeholder="임대비" style={{...dl.input, flex:1}} />
+                  <button onClick={()=>removeRow("equipment",i)} style={dl.removeBtn}>×</button>
+                </div>
+              ))}
+              <button style={dl.smallBtn} onClick={()=>addRow("equipment",{name:"",cost:0})}>+ 장비 추가</button>
+            </div>
+
+            <div style={dl.card}>
+              <div style={dl.sectionTitle}>💵 기타비용</div>
+              <div style={dl.row}>
+                <div style={{flex:1}}>
+                  <label style={dl.label}>식대</label>
+                  <input type="number" value={form.otherCosts.meal} onChange={e=>setForm(f=>({...f,otherCosts:{...f.otherCosts,meal:e.target.value}}))} style={dl.input} />
+                </div>
+                <div style={{flex:1}}>
+                  <label style={dl.label}>운반비</label>
+                  <input type="number" value={form.otherCosts.delivery} onChange={e=>setForm(f=>({...f,otherCosts:{...f.otherCosts,delivery:e.target.value}}))} style={dl.input} />
+                </div>
+                <div style={{flex:1}}>
+                  <label style={dl.label}>기타</label>
+                  <input type="number" value={form.otherCosts.etc} onChange={e=>setForm(f=>({...f,otherCosts:{...f.otherCosts,etc:e.target.value}}))} style={dl.input} />
+                </div>
+              </div>
+            </div>
+
+            <div style={dl.card}>
+              <div style={dl.sectionTitle}>📷 사진</div>
+              {form.photos && form.photos.length > 0 && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:10 }}>
+                  {form.photos.map((p,i) => (
+                    <div key={i} style={{ position:"relative", width:84, height:84, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
+                      <img src={p.url || p.previewUrl} alt="" onClick={()=>setGallery({ photos: form.photos, index: i })} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block", cursor:"pointer" }} />
+                      <button onClick={()=>removePhoto(i)} style={{ position:"absolute", top:2, right:2, width:20, height:20, borderRadius:"50%", border:"none", background:"rgba(26,26,46,0.65)", color:"#fff", fontSize:13, cursor:"pointer", lineHeight:1 }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <label style={{ ...dl.smallBtn, display:"inline-block" }}>
+                + 사진 추가
+                <input type="file" accept="image/*" multiple capture="environment" onChange={e=>{ if(e.target.files?.length) addPhotos(e.target.files); e.target.value=""; }} style={{ display:"none" }} />
+              </label>
+            </div>
+
+            <div style={dl.card}>
+              <label style={dl.label}>특이사항</label>
+              <textarea value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="현장 특이사항, 다음 작업 인계 내용 등" rows={2} style={{...dl.input, resize:"vertical"}} />
+            </div>
+
+            <div style={{ ...dl.card, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <span style={{ fontSize:14, fontWeight:700, color:"#1a1a2e" }}>오늘 총비용</span>
+              <span style={{ fontSize:18, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(calcTotal(form))}</span>
+            </div>
+
+            <div style={{ display:"flex", gap:8, marginTop:6 }}>
+              <button style={dl.secondaryBtn} onClick={()=>setView("list")}>취소</button>
+              <button style={{...dl.primaryBtn, opacity:saving?0.6:1}} disabled={saving} onClick={save}>{saving ? "저장 중..." : "저장"}</button>
+            </div>
+          </div>
+          {gallery && <PhotoLightbox gallery={gallery} setGallery={setGallery} />}
+          </>
+        );
+      }
+
+      return (
+        <>
+        <div className="placeholder-wrap">
+          <div style={{ ...dl.card, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div>
+              <div style={{ fontSize:12, color:"#a0aec0" }}>누적 총비용</div>
+              <div style={{ fontSize:20, fontWeight:900, color:"#1a1a2e" }}>{fmtMoney(grandTotal)}</div>
+            </div>
+            <button style={{ background:"#FF6B35", color:"#fff", border:"none", borderRadius:10, padding:"12px 18px", fontSize:14, fontWeight:700, cursor:"pointer" }} onClick={openNew}>+ 새 작업일지</button>
+          </div>
+
+          {processOptions.length > 0 && (
+            <div style={{ marginBottom:10 }}>
+              <select value={filterProcess} onChange={e=>setFilterProcess(e.target.value)} style={dl.input}>
+                <option value="">전체 공정</option>
+                {processOptions.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          )}
+
+          {filtered.length === 0 ? (
+            <div style={{ color:"#a0aec0", fontSize:14, padding:"40px 0", textAlign:"center" }}>작업일지가 없습니다. 새 작업일지를 추가해보세요.</div>
+          ) : filtered.map(log => (
+            <div key={log.id} style={dl.card} onClick={()=>openEdit(log)}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>{dayLabel(log.date)} · {log.process}{log.photos?.length > 0 && <span style={{ marginLeft:6, fontSize:12, color:"#a0aec0" }}>📷 {log.photos.length}</span>}</div>
+                  {log.area && <div style={{ fontSize:12, color:"#a0aec0", marginTop:2 }}>📍 {log.area}</div>}
+                  {log.content && <div style={{ fontSize:13, color:"#4a5568", marginTop:6, lineHeight:1.5 }}>{log.content}</div>}
+                  {log.photos?.length > 0 && (
+                    <div style={{ display:"flex", gap:6, marginTop:8 }}>
+                      {log.photos.slice(0,4).map((url,i) => (
+                        <div key={i} onClick={(e)=>{ e.stopPropagation(); setGallery({ photos: log.photos.map(u=>({url:u})), index: i }); }} style={{ width:48, height:48, borderRadius:6, overflow:"hidden", border:"1px solid #e2e8f0", cursor:"pointer", flexShrink:0, position:"relative" }}>
+                          <img src={url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                          {i===3 && log.photos.length>4 && (
+                            <div style={{ position:"absolute", inset:0, background:"rgba(26,26,46,0.55)", color:"#fff", fontSize:12, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>+{log.photos.length-4}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <div style={{ fontSize:14, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(log.totalCost)}</div>
+                  <button onClick={(e)=>{ e.stopPropagation(); removeLog(log.id); }} style={{ ...dl.removeBtn, marginTop:4 }}>삭제</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {gallery && <PhotoLightbox gallery={gallery} setGallery={setGallery} />}
+        </>
+      );
+    }
+
+    function PhotoLightbox({ gallery, setGallery }) {
+      const { photos, index } = gallery;
+      const photo = photos[index];
+      const src = photo.url || photo.previewUrl;
+      const prev = (e) => { e.stopPropagation(); setGallery(g => ({ ...g, index: (g.index - 1 + photos.length) % photos.length })); };
+      const next = (e) => { e.stopPropagation(); setGallery(g => ({ ...g, index: (g.index + 1) % photos.length })); };
+      return (
+        <div onClick={()=>setGallery(null)} style={{
+          position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:1000,
+          display:"flex", alignItems:"center", justifyContent:"center",
+        }}>
+          <button onClick={()=>setGallery(null)} style={{ position:"absolute", top:16, right:16, width:36, height:36, borderRadius:"50%", border:"none", background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:18, cursor:"pointer" }}>×</button>
+          {photos.length > 1 && (
+            <div style={{ position:"absolute", top:16, left:16, color:"#fff", fontSize:13, background:"rgba(255,255,255,0.15)", borderRadius:8, padding:"4px 10px" }}>{index+1} / {photos.length}</div>
+          )}
+          {photos.length > 1 && (
+            <button onClick={prev} style={{ position:"absolute", left:8, top:"50%", transform:"translateY(-50%)", width:44, height:44, borderRadius:"50%", border:"none", background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:22, cursor:"pointer" }}>‹</button>
+          )}
+          <img src={src} alt="" onClick={e=>e.stopPropagation()} style={{ maxWidth:"92vw", maxHeight:"86vh", objectFit:"contain", borderRadius:8 }} />
+          {photos.length > 1 && (
+            <button onClick={next} style={{ position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", width:44, height:44, borderRadius:"50%", border:"none", background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:22, cursor:"pointer" }}>›</button>
+          )}
+        </div>
+      );
+    }
+
+    const COST_COLORS = { labor:"#FF6B35", material:"#4472C4", equipment:"#48BB78", other:"#A0AEC0" };
+    const COST_LABELS = { labor:"인건비", material:"자재비", equipment:"장비비", other:"기타" };
+
+    function CostTab() {
+      const { siteId } = React.useContext(SiteContext);
+      const [logs, setLogs] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [budget, setBudget] = useState(0);
+      const [budgetInput, setBudgetInput] = useState("");
+      const [editingBudget, setEditingBudget] = useState(false);
+
+      useEffect(() => {
+        (async () => {
+          const [data, settings] = await Promise.all([fetchCollection("dailyLogs", siteId), getSiteSettings(siteId)]);
+          setLogs(data);
+          const b = Number(settings?.budget) || 0;
+          setBudget(b);
+          setBudgetInput(b ? String(b) : "");
+          setLoaded(true);
+        })();
+      }, [siteId]);
+
+      const saveBudget = async () => {
+        const v = Math.max(0, Number(budgetInput) || 0);
+        setBudget(v);
+        setEditingBudget(false);
+        await saveSiteSettings(siteId, { budget: v });
+      };
+
+      const totalCost = useMemo(() => logs.reduce((s,l) => s + (Number(l.totalCost)||0), 0), [logs]);
+      const vatAmount = Math.round(totalCost * 0.1);
+      const totalWithVat = totalCost + vatAmount;
+
+      const weekCost = useMemo(() => {
+        const w = new Date(); w.setDate(w.getDate()-6);
+        const wStr = fmtDate(w);
+        return logs.filter(l => l.date >= wStr).reduce((s,l) => s + (Number(l.totalCost)||0), 0);
+      }, [logs]);
+
+      const breakdown = useMemo(() => {
+        const b = { labor:0, material:0, equipment:0, other:0 };
+        logs.forEach(l => {
+          b.labor += (l.workers||[]).reduce((s,w) => s + (Number(w.laborCost)||0), 0);
+          b.material += (l.materials||[]).reduce((s,m) => s + (Number(m.qty)||0) * (Number(m.unitPrice)||0), 0);
+          b.equipment += (l.equipment||[]).reduce((s,e) => s + (Number(e.cost)||0), 0);
+          const oc = l.otherCosts||{};
+          b.other += (Number(oc.meal)||0) + (Number(oc.delivery)||0) + (Number(oc.etc)||0);
+        });
+        return b;
+      }, [logs]);
+
+      const breakdownTotal = breakdown.labor + breakdown.material + breakdown.equipment + breakdown.other;
+      const conicGradient = useMemo(() => {
+        if (!breakdownTotal) return "#e2e8f0";
+        let acc = 0;
+        const parts = ["labor","material","equipment","other"].map(k => {
+          const pct = breakdown[k] / breakdownTotal * 100;
+          const start = acc; acc += pct;
+          return `${COST_COLORS[k]} ${start}% ${acc}%`;
+        });
+        return `conic-gradient(${parts.join(", ")})`;
+      }, [breakdown, breakdownTotal]);
+
+      const byProcess = useMemo(() => {
+        const map = {};
+        logs.forEach(l => { const key = l.process || "기타"; map[key] = (map[key]||0) + (Number(l.totalCost)||0); });
+        return Object.entries(map).sort((a,b) => b[1]-a[1]);
+      }, [logs]);
+      const maxProcessCost = byProcess.length ? byProcess[0][1] : 0;
+
+      const cumulative = useMemo(() => {
+        const map = {};
+        logs.forEach(l => { map[l.date] = (map[l.date]||0) + (Number(l.totalCost)||0); });
+        const dates = Object.keys(map).sort();
+        let sum = 0;
+        return dates.map(d => { sum += map[d]; return { date: d, value: sum }; });
+      }, [logs]);
+
+      const maxCum = Math.max(1, budget, ...cumulative.map(c => c.value));
+      const linePoints = cumulative.map((c,i) => ({
+        x: cumulative.length > 1 ? (i/(cumulative.length-1)) * 280 : 140,
+        y: 100 - (c.value/maxCum) * 90,
+      }));
+      const pathD = linePoints.length ? "M" + linePoints.map(p => `${p.x},${p.y}`).join(" L") : "";
+      const budgetY = budget ? 100 - (budget/maxCum) * 90 : null;
+
+      const remaining = budget - totalCost;
+      const usedPct = budget ? Math.round(totalCost/budget*100) : null;
+
+      if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
+
+      return (
+        <div className="placeholder-wrap">
+          {/* 누적 / 주간 비용 */}
+          <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+            <div style={{ flex:1, background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
+              <div style={{ fontSize:12, color:"#a0aec0" }}>누적 비용</div>
+              <div style={{ fontSize:18, fontWeight:900, color:"#1a1a2e" }}>{fmtMoney(totalCost)}</div>
+              <div style={{ fontSize:11, color:"#a0aec0", marginTop:2 }}>VAT(10%) 포함 {fmtMoney(totalWithVat)}</div>
+            </div>
+            <div style={{ flex:1, background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
+              <div style={{ fontSize:12, color:"#a0aec0" }}>최근 7일 비용</div>
+              <div style={{ fontSize:18, fontWeight:900, color:"#1a1a2e" }}>{fmtMoney(weekCost)}</div>
+            </div>
+          </div>
+
+          {/* 예산 대비 실비 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <div style={{ fontSize:12, color:"#a0aec0" }}>예산 대비 실비</div>
+              {!editingBudget && (
+                <button onClick={() => { setBudgetInput(budget ? String(budget) : ""); setEditingBudget(true); }} style={{ background:"none", border:"none", color:"#FF6B35", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                  {budget ? "예산 수정" : "예산 설정"}
+                </button>
+              )}
+            </div>
+            {editingBudget ? (
+              <div style={{ display:"flex", gap:6 }}>
+                <input type="number" value={budgetInput} onChange={e=>setBudgetInput(e.target.value)} placeholder="예산 입력 (원)" style={{ flex:1, padding:"10px 12px", fontSize:14, borderRadius:8, border:"1.5px solid #e2e8f0", outline:"none", color:"#2d3748" }} />
+                <button onClick={saveBudget} style={{ background:"#FF6B35", color:"#fff", border:"none", borderRadius:8, padding:"0 16px", fontSize:13, fontWeight:700, cursor:"pointer" }}>저장</button>
+              </div>
+            ) : budget ? (
+              <>
+                <div style={{ fontSize:18, fontWeight:900, color: remaining<0 ? "#e53e3e" : "#1a1a2e" }}>
+                  {fmtMoney(totalCost)} <span style={{ fontSize:12, fontWeight:500, color:"#a0aec0" }}>/ {fmtMoney(budget)}</span>
+                </div>
+                <div style={{ marginTop:6, height:6, borderRadius:4, background:"#edf2f7", overflow:"hidden" }}>
+                  <div style={{ width:`${Math.min(100,usedPct)}%`, height:"100%", background: usedPct>100 ? "#e53e3e" : "#FF6B35", borderRadius:4 }} />
+                </div>
+                <div style={{ fontSize:11, color: remaining<0 ? "#e53e3e" : "#a0aec0", marginTop:4 }}>
+                  {remaining>=0 ? `잔여 예산 ${fmtMoney(remaining)} (${usedPct}% 사용)` : `예산 초과 ${fmtMoney(-remaining)} (${usedPct}% 사용)`}
+                </div>
+                <div style={{ fontSize:11, color:"#a0aec0", marginTop:2 }}>VAT(10%) 포함 실비 {fmtMoney(totalWithVat)}</div>
+              </>
+            ) : (
+              <div style={{ fontSize:13, color:"#a0aec0" }}>예산을 설정하면 진행 상황을 비교할 수 있습니다.</div>
+            )}
+          </div>
+
+          {/* 날짜별 누적 비용 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>날짜별 누적 비용</div>
+            {cumulative.length === 0 ? (
+              <div style={{ fontSize:12, color:"#a0aec0", textAlign:"center", padding:"20px 0" }}>작업일지를 등록하면 그래프가 표시됩니다.</div>
+            ) : (
+              <>
+                <svg viewBox="0 0 280 110" style={{ width:"100%", height:120, overflow:"visible" }} preserveAspectRatio="none">
+                  {budgetY !== null && budgetY >= 0 && budgetY <= 100 && (
+                    <line x1="0" y1={budgetY} x2="280" y2={budgetY} stroke="#e53e3e" strokeDasharray="4 3" strokeWidth="1" />
+                  )}
+                  <path d={pathD} fill="none" stroke="#FF6B35" strokeWidth="2" />
+                  {linePoints.map((p,i) => <circle key={i} cx={p.x} cy={p.y} r="2.5" fill="#FF6B35" />)}
+                </svg>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#a0aec0", marginTop:4 }}>
+                  <span>{dayLabel(cumulative[0].date)}</span>
+                  <span>{dayLabel(cumulative[cumulative.length-1].date)}</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 항목별 비용 비중 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>항목별 비용 비중</div>
+            {breakdownTotal === 0 ? (
+              <div style={{ fontSize:12, color:"#a0aec0", textAlign:"center", padding:"10px 0" }}>등록된 비용 데이터가 없습니다.</div>
+            ) : (
+              <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+                <div style={{ width:88, height:88, borderRadius:"50%", background:conicGradient, flexShrink:0 }} />
+                <div style={{ flex:1, display:"flex", flexDirection:"column", gap:6 }}>
+                  {["labor","material","equipment","other"].map(k => (
+                    <div key={k} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#4a5568" }}>
+                      <span style={{ width:10, height:10, borderRadius:3, background:COST_COLORS[k], flexShrink:0 }} />
+                      <span style={{ flex:1 }}>{COST_LABELS[k]}</span>
+                      <span style={{ fontWeight:700, color:"#1a1a2e" }}>{breakdownTotal ? Math.round(breakdown[k]/breakdownTotal*100) : 0}%</span>
+                      <span style={{ color:"#a0aec0", minWidth:70, textAlign:"right" }}>{fmtMoney(breakdown[k])}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 공종별 비용 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>공종별 비용</div>
+            {byProcess.length === 0 ? (
+              <div style={{ fontSize:12, color:"#a0aec0", textAlign:"center", padding:"10px 0" }}>등록된 비용 데이터가 없습니다.</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {byProcess.map(([name, cost]) => (
+                  <div key={name}>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:11.5, color:"#4a5568", marginBottom:3 }}>
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"70%" }}>{name}</span>
+                      <span style={{ fontWeight:700, color:"#1a1a2e" }}>{fmtMoney(cost)}</span>
+                    </div>
+                    <div style={{ height:8, borderRadius:4, background:"#edf2f7", overflow:"hidden" }}>
+                      <div style={{ width:`${maxProcessCost ? (cost/maxProcessCost*100) : 0}%`, height:"100%", background:"#FF6B35", borderRadius:4 }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 자재 발주 트래커 */}
+          <MaterialTracker />
+
+          {/* 업체·인력 연락처 */}
+          <ContactList />
+        </div>
+      );
+    }
+
+    const MATERIAL_STATUS = ["필요", "주문완료", "입고완료"];
+    const MATERIAL_STATUS_COLOR = { "필요":"#ED8936", "주문완료":"#4472C4", "입고완료":"#48BB78" };
+
+    function MaterialTracker() {
+      const { siteId } = React.useContext(SiteContext);
+      const [items, setItems] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [adding, setAdding] = useState(false);
+      const [form, setForm] = useState({ name:"", spec:"", qty:"", unit:"", note:"", minQty:"" });
+
+      useEffect(() => { (async () => { setItems(await fetchCollection("materials", siteId)); setLoaded(true); })(); }, [siteId]);
+
+      const sorted = [...items].sort((a,b) => (a.createdAt||"").localeCompare(b.createdAt||""));
+
+      const addItem = async () => {
+        if (!form.name.trim()) return;
+        const id = newId("mat");
+        const data = { siteId, name:form.name, spec:form.spec, qty:form.qty, unit:form.unit, note:form.note, minQty:form.minQty, status:"필요", createdAt: new Date().toISOString() };
+        setItems(its => [...its, { id, ...data }]);
+        setForm({ name:"", spec:"", qty:"", unit:"", note:"", minQty:"" });
+        setAdding(false);
+        await setDoc("materials", id, data);
+      };
+
+      const cycleStatus = async (item) => {
+        const idx = MATERIAL_STATUS.indexOf(item.status||"필요");
+        const next = MATERIAL_STATUS[(idx+1) % MATERIAL_STATUS.length];
+        setItems(its => its.map(i => i.id===item.id ? {...i, status:next} : i));
+        await setDoc("materials", item.id, { status: next });
+      };
+
+      const removeItem = async (id) => {
+        setItems(its => its.filter(i => i.id !== id));
+        await deleteDocFn("materials", id);
+      };
+
+      if (!loaded) return null;
+
+      return (
+        <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>자재 발주 트래커</div>
+            <button onClick={()=>setAdding(a=>!a)} style={{ background:"none", border:"none", color:"#FF6B35", fontSize:12, fontWeight:700, cursor:"pointer" }}>{adding?"닫기":"+ 추가"}</button>
+          </div>
+          {adding && (
+            <div style={{ marginBottom:10, padding:10, background:"#f7f8fa", borderRadius:8 }}>
+              <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+                <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="자재명" style={{...dl.input, flex:2}} />
+                <input value={form.spec} onChange={e=>setForm(f=>({...f,spec:e.target.value}))} placeholder="규격" style={{...dl.input, flex:1}} />
+              </div>
+              <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+                <input type="number" value={form.qty} onChange={e=>setForm(f=>({...f,qty:e.target.value}))} placeholder="수량" style={{...dl.input, flex:1}} />
+                <input value={form.unit} onChange={e=>setForm(f=>({...f,unit:e.target.value}))} placeholder="단위" style={{...dl.input, flex:1}} />
+                <input type="number" value={form.minQty} onChange={e=>setForm(f=>({...f,minQty:e.target.value}))} placeholder="최소 보유량" style={{...dl.input, flex:1}} />
+              </div>
+              <input value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="메모 (업체, 예상 입고일 등)" style={{...dl.input, marginBottom:6}} />
+              <button onClick={addItem} style={{ ...dl.primaryBtn, padding:"10px 0", fontSize:13 }}>추가</button>
+            </div>
+          )}
+          {sorted.length === 0 ? (
+            <div style={{ fontSize:12, color:"#a0aec0", textAlign:"center", padding:"10px 0" }}>등록된 자재가 없습니다.</div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {sorted.map(item => {
+                const low = item.minQty !== undefined && item.minQty !== "" && Number(item.qty) <= Number(item.minQty);
+                return (
+                <div key={item.id} style={{
+                  display:"flex", alignItems:"center", gap:8, padding:"8px 8px", borderBottom:"1px solid #f0f0f3",
+                  background: low ? "#FFF5F5" : "transparent", borderRadius: low ? 8 : 0,
+                  border: low ? `1px solid ${DELAY_COLOR}` : "none",
+                }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", display:"flex", alignItems:"center", gap:4 }}>
+                      {low && <span title="재고 부족" style={{ fontSize:11, color:DELAY_COLOR, flexShrink:0 }}>⚠️</span>}
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.name}{item.spec && <span style={{ fontWeight:500, color:"#a0aec0" }}> · {item.spec}</span>}</span>
+                    </div>
+                    <div style={{ fontSize:11, color: low ? DELAY_COLOR : "#a0aec0", marginTop:2, fontWeight: low ? 700 : 400 }}>
+                      {item.qty}{item.unit}{item.minQty!=="" && item.minQty!==undefined && ` (최소 ${item.minQty}${item.unit})`}{item.note && ` · ${item.note}`}
+                      {low && " · 재고 부족"}
+                    </div>
+                  </div>
+                  <button onClick={()=>cycleStatus(item)} style={{ background:MATERIAL_STATUS_COLOR[item.status||"필요"], color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", flexShrink:0 }}>{item.status||"필요"}</button>
+                  <button onClick={()=>removeItem(item.id)} style={dl.removeBtn}>×</button>
+                </div>
+              );})}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ContactList() {
+      const { siteId } = React.useContext(SiteContext);
+      const [contacts, setContacts] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [adding, setAdding] = useState(false);
+      const [form, setForm] = useState({ name:"", role:"", phone:"" });
+
+      useEffect(() => { (async () => { setContacts(await fetchCollection("contacts", siteId)); setLoaded(true); })(); }, [siteId]);
+
+      const addContact = async () => {
+        if (!form.name.trim() || !form.phone.trim()) return;
+        const id = newId("contact");
+        const data = { siteId, name:form.name, role:form.role, phone:form.phone };
+        setContacts(cs => [...cs, { id, ...data }]);
+        setForm({ name:"", role:"", phone:"" });
+        setAdding(false);
+        await setDoc("contacts", id, data);
+      };
+
+      const removeContact = async (id) => {
+        setContacts(cs => cs.filter(c => c.id !== id));
+        await deleteDocFn("contacts", id);
+      };
+
+      if (!loaded) return null;
+
+      return (
+        <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>업체 · 인력 연락처</div>
+            <button onClick={()=>setAdding(a=>!a)} style={{ background:"none", border:"none", color:"#FF6B35", fontSize:12, fontWeight:700, cursor:"pointer" }}>{adding?"닫기":"+ 추가"}</button>
+          </div>
+          {adding && (
+            <div style={{ marginBottom:10, padding:10, background:"#f7f8fa", borderRadius:8 }}>
+              <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+                <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="이름/업체명" style={{...dl.input, flex:1}} />
+                <input value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))} placeholder="구분 (전기/설비 등)" style={{...dl.input, flex:1}} />
+              </div>
+              <input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="연락처" style={{...dl.input, marginBottom:6}} />
+              <button onClick={addContact} style={{ ...dl.primaryBtn, padding:"10px 0", fontSize:13 }}>추가</button>
+            </div>
+          )}
+          {contacts.length === 0 ? (
+            <div style={{ fontSize:12, color:"#a0aec0", textAlign:"center", padding:"10px 0" }}>등록된 연락처가 없습니다.</div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {contacts.map(c => (
+                <div key={c.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #f0f0f3" }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>{c.name}{c.role && <span style={{ fontWeight:500, color:"#a0aec0" }}> · {c.role}</span>}</div>
+                    <div style={{ fontSize:11, color:"#a0aec0", marginTop:2 }}>{c.phone}</div>
+                  </div>
+                  <a href={`tel:${c.phone}`} style={{ background:"#48BB78", color:"#fff", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, textDecoration:"none", flexShrink:0 }}>📞 전화</a>
+                  <a href={`sms:${c.phone}`} style={{ background:"#4472C4", color:"#fff", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, textDecoration:"none", flexShrink:0 }}>💬 문자</a>
+                  <button onClick={()=>removeContact(c.id)} style={dl.removeBtn}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function SettingsTab() {
+      const { siteId, siteName, renameSite, deleteSite, switchSite } = React.useContext(SiteContext);
+      const [loaded, setLoaded] = useState(false);
+      const [form, setForm] = useState({ name:"", address:"", periodStart:"", periodEnd:"", client:"", notifyEnabled:true, budget:"", pin:"", lat:"", lon:"", anthropicApiKey:"" });
+      const [saving, setSaving] = useState(false);
+      const [saved, setSaved] = useState(false);
+      const [exporting, setExporting] = useState("");
+      const importInputRef = useRef();
+
+      useEffect(() => {
+        (async () => {
+          const s = await getSiteSettings(siteId);
+          setForm(f => ({
+            ...f, ...s,
+            name: siteName || "",
+            notifyEnabled: s.notifyEnabled !== false,
+            budget: s.budget || "", pin: s.pin || "", lat: s.lat || "", lon: s.lon || "",
+            anthropicApiKey: s.anthropicApiKey || "",
+          }));
+          setLoaded(true);
+        })();
+      }, [siteId, siteName]);
+
+      const saveInfo = async () => {
+        setSaving(true);
+        if (form.name.trim() && form.name.trim() !== siteName) {
+          await renameSite(siteId, form.name.trim());
+        }
+        await saveSiteSettings(siteId, {
+          address: form.address, periodStart: form.periodStart, periodEnd: form.periodEnd,
+          client: form.client, notifyEnabled: form.notifyEnabled, budget: form.budget,
+          pin: form.pin.trim(), lat: form.lat, lon: form.lon,
+          anthropicApiKey: form.anthropicApiKey.trim(),
+        });
+        setSaving(false);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1800);
+      };
+
+      const exportDailyLogXlsx = async () => {
+        setExporting("dailylog");
+        try {
+          const logs = await fetchCollection("dailyLogs", siteId);
+          const rows = [...logs].sort((a,b) => a.date.localeCompare(b.date)).map(l => ({
+            날짜: l.date, 공정: l.process, 위치: l.area||"", 내용: l.content||"",
+            인건비: (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0),
+            자재비: (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0),
+            장비비: (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0),
+            기타비용: (Number(l.otherCosts?.meal)||0)+(Number(l.otherCosts?.delivery)||0)+(Number(l.otherCosts?.etc)||0),
+            합계: Number(l.totalCost)||0,
+            비고: l.note||"",
+          }));
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "작업일지");
+          XLSX.writeFile(wb, `${siteName}_작업일지_${today}.xlsx`);
+        } finally { setExporting(""); }
+      };
+
+      const exportScheduleXlsx = async () => {
+        setExporting("schedule");
+        try {
+          const tasks = await fetchCollection("schedule", siteId);
+          const rows = [...tasks].sort((a,b) => a.startDate.localeCompare(b.startDate)).map(t => ({
+            공종: t.name, 시작일: t.startDate, 종료일: t.endDate, 상태: STATUS_LABEL[t.status]||t.status, 비고: t.note||"",
+          }));
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "공정표");
+          XLSX.writeFile(wb, `${siteName}_공정표_${today}.xlsx`);
+        } finally { setExporting(""); }
+      };
+
+      const exportCostXlsx = async () => {
+        setExporting("cost");
+        try {
+          const logs = await fetchCollection("dailyLogs", siteId);
+          const map = {};
+          logs.forEach(l => {
+            const key = l.process || "기타";
+            if (!map[key]) map[key] = { 공종:key, 인건비:0, 자재비:0, 장비비:0, 기타비용:0, 합계:0 };
+            const labor = (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0);
+            const material = (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0);
+            const equipment = (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0);
+            const other = (Number(l.otherCosts?.meal)||0)+(Number(l.otherCosts?.delivery)||0)+(Number(l.otherCosts?.etc)||0);
+            map[key].인건비 += labor; map[key].자재비 += material; map[key].장비비 += equipment; map[key].기타비용 += other;
+            map[key].합계 += labor+material+equipment+other;
+          });
+          const rows = Object.values(map);
+          const grandTotal = rows.reduce((s,r)=>s+r.합계,0);
+          rows.push({
+            공종:"총합계",
+            인건비: rows.reduce((s,r)=>s+r.인건비,0),
+            자재비: rows.reduce((s,r)=>s+r.자재비,0),
+            장비비: rows.reduce((s,r)=>s+r.장비비,0),
+            기타비용: rows.reduce((s,r)=>s+r.기타비용,0),
+            합계: grandTotal,
+          });
+          const vat = Math.round(grandTotal * 0.1);
+          rows.push({ 공종:"부가세(VAT 10%)", 인건비:"", 자재비:"", 장비비:"", 기타비용:"", 합계: vat });
+          rows.push({ 공종:"총합계(VAT포함)", 인건비:"", 자재비:"", 장비비:"", 기타비용:"", 합계: grandTotal + vat });
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "비용정산서");
+          XLSX.writeFile(wb, `${siteName}_비용정산서_${today}.xlsx`);
+        } finally { setExporting(""); }
+      };
+
+      const exportBackupJson = async () => {
+        setExporting("backup");
+        try {
+          const [dailyLogs, schedule, materials, contacts, siteSettings, cloud] = await Promise.all([
+            fetchCollection("dailyLogs", siteId), fetchCollection("schedule", siteId), fetchCollection("materials", siteId),
+            fetchCollection("contacts", siteId), getSiteSettings(siteId), cloudLoad(),
+          ]);
+          const checklist = {};
+          Object.keys(cloud?.logs || {}).forEach(k => { if (k.startsWith(siteId + "_")) checklist[k] = cloud.logs[k]; });
+          const backup = { exportedAt: new Date().toISOString(), siteId, siteName, dailyLogs, schedule, materials, contacts, siteSettings, checklist };
+          const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `${siteName}_백업_${today}.json`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } finally { setExporting(""); }
+      };
+
+      const importBackupJson = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setExporting("import");
+        try {
+          const text = await file.text();
+          const data = JSON.parse(text);
+          const ok = window.confirm(
+            `백업 파일(${data.siteName || "알 수 없음"}, ${data.exportedAt ? data.exportedAt.slice(0,10) : ""})을 ` +
+            `현재 현장(${siteName})으로 가져옵니다. 기존 데이터와 병합됩니다. 계속할까요?`
+          );
+          if (!ok) return;
+          for (const l of (data.dailyLogs||[])) await setDoc("dailyLogs", l.id, { ...l, siteId });
+          for (const t of (data.schedule||[])) await setDoc("schedule", t.id, { ...t, siteId });
+          for (const m of (data.materials||[])) await setDoc("materials", m.id, { ...m, siteId });
+          for (const c of (data.contacts||[])) await setDoc("contacts", c.id, { ...c, siteId });
+          if (data.siteSettings) await saveSiteSettings(siteId, data.siteSettings);
+          if (data.checklist) {
+            const cloud = await cloudLoad();
+            const remapped = {};
+            Object.keys(data.checklist).forEach(k => {
+              const day = k.slice(k.indexOf("_")+1);
+              remapped[`${siteId}_${day}`] = data.checklist[k];
+            });
+            await cloudSave(cloud?.sites || [], { ...(cloud?.logs||{}), ...remapped });
+          }
+          notify("백업 데이터를 가져왔습니다. 새로고침 후 확인해주세요.", "success");
+        } catch (err) {
+          console.warn("import err", err);
+          notify("백업 파일을 읽는 중 오류가 발생했습니다. 파일 형식을 확인해주세요.");
+        } finally {
+          setExporting("");
+          e.target.value = "";
+        }
+      };
+
+      if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
+
+      return (
+        <div className="placeholder-wrap">
+          {/* 현장 정보 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>현장 정보</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="현장명 (예: 선기동698 리모델링)" style={dl.input} />
+              <input value={form.address} onChange={e=>setForm(f=>({...f,address:e.target.value}))} placeholder="주소" style={dl.input} />
+              <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                <input type="date" value={form.periodStart} onChange={e=>setForm(f=>({...f,periodStart:e.target.value}))} style={{...dl.input, flex:1}} />
+                <span style={{ color:"#a0aec0" }}>~</span>
+                <input type="date" value={form.periodEnd} onChange={e=>setForm(f=>({...f,periodEnd:e.target.value}))} style={{...dl.input, flex:1}} />
+              </div>
+              <input value={form.client} onChange={e=>setForm(f=>({...f,client:e.target.value}))} placeholder="발주처" style={dl.input} />
+              <input type="number" value={form.budget} onChange={e=>setForm(f=>({...f,budget:e.target.value}))} placeholder="예산 (원)" style={dl.input} />
+            </div>
+          </div>
+
+          {/* 날씨 위치 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>현장 날씨 위치</div>
+            <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>비워두면 기본 위치(경북 구미시)로 표시됩니다. 위도/경도는 지도 앱에서 좌표를 검색해 입력하세요.</div>
+            <div style={{ display:"flex", gap:6 }}>
+              <input type="number" step="0.0001" value={form.lat} onChange={e=>setForm(f=>({...f,lat:e.target.value}))} placeholder="위도 (예: 36.12)" style={{...dl.input, flex:1}} />
+              <input type="number" step="0.0001" value={form.lon} onChange={e=>setForm(f=>({...f,lon:e.target.value}))} placeholder="경도 (예: 128.34)" style={{...dl.input, flex:1}} />
+            </div>
+          </div>
+
+          {/* PIN 보안 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>현장 PIN 잠금</div>
+            <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>
+              PIN을 설정하면 이 현장을 열 때 PIN 입력이 필요합니다. 브라우저 단의 1차 방어이며, 데이터 자체의 접근 권한은 Firebase 콘솔의 Firestore 보안 규칙에서 별도로 설정해야 합니다.
+            </div>
+            <input value={form.pin} onChange={e=>setForm(f=>({...f,pin:e.target.value.replace(/[^0-9]/g,"")}))} placeholder="숫자 PIN (비워두면 잠금 해제)" inputMode="numeric" style={dl.input} />
+          </div>
+
+          {/* AI 자동분류 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>AI 작업일지 자동분류</div>
+            <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>
+              작업일지에서 줄글로 작성한 내용을 AI(Claude)가 분석해 공정·인원·자재·장비·비용 항목에 자동으로 채워줍니다. console.anthropic.com에서 발급한 API 키를 입력하세요. 입력한 키는 이 현장의 설정에 저장되며, 사용한 만큼 본인 계정으로 과금됩니다.
+            </div>
+            <input type="password" value={form.anthropicApiKey} onChange={e=>setForm(f=>({...f,anthropicApiKey:e.target.value.trim()}))} placeholder="Anthropic API 키 (sk-ant-...)" style={dl.input} />
+          </div>
+
+          {/* 알림 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
+            <div>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>다음날 공정 알림</div>
+              <div style={{ fontSize:11, color:"#a0aec0", marginTop:2 }}>앱 접속 시 내일 시작되는 공정을 배너로 안내합니다</div>
+            </div>
+            <label style={{ position:"relative", display:"inline-block", width:44, height:24, flexShrink:0, cursor:"pointer" }}>
+              <input type="checkbox" checked={form.notifyEnabled} onChange={e=>setForm(f=>({...f,notifyEnabled:e.target.checked}))} style={{ opacity:0, width:0, height:0 }} />
+              <span style={{ position:"absolute", inset:0, background: form.notifyEnabled?"#FF6B35":"#cbd5e0", borderRadius:24, transition:"0.2s" }} />
+              <span style={{ position:"absolute", top:3, left: form.notifyEnabled?23:3, width:18, height:18, background:"#fff", borderRadius:"50%", transition:"0.2s" }} />
+            </label>
+          </div>
+
+          <button onClick={saveInfo} disabled={saving} style={{ ...dl.primaryBtn, marginBottom:14 }}>{saving ? "저장 중..." : saved ? "✓ 저장됨" : "현장 정보 저장"}</button>
+
+          {/* 데이터 내보내기 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>데이터 내보내기</div>
+            <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>엑셀(.xlsx) 파일로 다운로드됩니다. 다운로드 후 공유 메뉴를 이용해 구글 드라이브 등에 저장할 수 있습니다.</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              <button onClick={exportDailyLogXlsx} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="dailylog" ? "내보내는 중..." : "📝 작업일지 내보내기 (.xlsx)"}</button>
+              <button onClick={exportScheduleXlsx} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="schedule" ? "내보내는 중..." : "📅 공정표 내보내기 (.xlsx)"}</button>
+              <button onClick={exportCostXlsx} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="cost" ? "내보내는 중..." : "💰 비용 정산서 내보내기 (.xlsx)"}</button>
+              <button onClick={exportBackupJson} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="backup" ? "내보내는 중..." : "💾 전체 백업 (.json)"}</button>
+              <input ref={importInputRef} type="file" accept="application/json" onChange={importBackupJson} style={{ display:"none" }} />
+              <button onClick={()=>importInputRef.current?.click()} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="import" ? "가져오는 중..." : "📥 백업 가져오기 (.json)"}</button>
+            </div>
+          </div>
+
+          {/* 현장 관리 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>현장 관리</div>
+            <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>다른 현장으로 전환하거나 새 현장을 추가할 수 있습니다.</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              <button onClick={switchSite} style={dl.secondaryBtn}>🏗 현장 변경 / 추가</button>
+              <button onClick={() => { if (window.confirm(`'${siteName}' 현장을 목록에서 삭제할까요?\n(이 현장의 작업일지·공정표 등 데이터는 Firestore에 남아있지만 더 이상 앱에서 보이지 않습니다)`)) deleteSite(siteId); }} style={{ ...dl.secondaryBtn, borderColor:"#feb2b2", color:"#e53e3e" }}>🗑 이 현장 목록에서 삭제</button>
+            </div>
+          </div>
+
+          {/* 오래된 데이터 정리 */}
+          <CleanupSection />
+        </div>
+      );
+    }
+
+    function CleanupSection() {
+      const { siteId } = React.useContext(SiteContext);
+      const [cutoff, setCutoff] = useState(() => {
+        const d = new Date(); d.setMonth(d.getMonth()-3);
+        return fmtDate(d);
+      });
+      const [busy, setBusy] = useState(false);
+      const [status, setStatus] = useState("");
+
+      const run = async () => {
+        setBusy(true);
+        setStatus("");
+        try {
+          const logs = await fetchCollection("dailyLogs", siteId);
+          const targets = logs.filter(l => l.date < cutoff);
+          if (targets.length === 0) {
+            setStatus("해당 기간에 정리할 작업일지가 없습니다.");
+            setBusy(false);
+            return;
+          }
+
+          // 1) 백업 파일 먼저 다운로드 (xlsx + json, 사진 URL 포함)
+          const rows = targets.map(l => ({
+            날짜: l.date, 공정: l.process, 위치: l.area||"", 내용: l.content||"",
+            인건비: (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0),
+            자재비: (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0),
+            장비비: (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0),
+            기타비용: (Number(l.otherCosts?.meal)||0)+(Number(l.otherCosts?.delivery)||0)+(Number(l.otherCosts?.etc)||0),
+            합계: Number(l.totalCost)||0,
+            비고: l.note||"",
+            사진: (l.photos||[]).join(", "),
+          }));
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "백업");
+          XLSX.writeFile(wb, `작업일지_백업_${cutoff}이전_${today}.xlsx`);
+
+          const blob = new Blob([JSON.stringify(targets, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `작업일지_백업_${cutoff}이전_${today}.json`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          // 2) 사용자 확인
+          const photoCount = targets.reduce((s,l) => s + (l.photos?.length||0), 0);
+          const ok = window.confirm(
+            `${cutoff} 이전 작업일지 ${targets.length}건(사진 ${photoCount}장 포함)을 백업 파일로 내보냈습니다.\n` +
+            `다운로드된 파일을 확인하셨다면 삭제를 진행할까요?\n이 작업은 되돌릴 수 없습니다.`
+          );
+          if (!ok) {
+            setStatus("삭제를 취소했습니다. 백업 파일은 다운로드되었습니다.");
+            setBusy(false);
+            return;
+          }
+
+          // 3) Firestore + Storage 삭제
+          for (const l of targets) {
+            for (const photoUrl of (l.photos||[])) await deletePhoto(photoUrl);
+            await deleteDocFn("dailyLogs", l.id);
+          }
+          setStatus(`✓ 작업일지 ${targets.length}건과 사진 ${photoCount}장을 삭제했습니다.`);
+        } catch (e) {
+          console.warn("cleanup err", e);
+          setStatus("처리 중 오류가 발생했습니다.");
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      return (
+        <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>오래된 작업일지 정리</div>
+          <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>
+            선택한 날짜 이전의 작업일지를 백업(.xlsx + .json) 파일로 먼저 내보낸 뒤, 확인하면 Firestore와 사진(Storage)에서 삭제합니다. 저장 공간이 부족할 때 사용하세요.
+          </div>
+          <div style={{ display:"flex", gap:6, marginBottom:8, alignItems:"center" }}>
+            <span style={{ fontSize:12, color:"#4a5568", flexShrink:0 }}>이 날짜 이전:</span>
+            <input type="date" value={cutoff} onChange={e=>setCutoff(e.target.value)} style={{...dl.input, flex:1}} />
+          </div>
+          <button onClick={run} disabled={busy} style={{ ...dl.secondaryBtn, borderColor:"#feb2b2", color:"#e53e3e" }}>
+            {busy ? "처리 중..." : "🗑 백업 후 삭제"}
+          </button>
+          {status && <div style={{ fontSize:11, color:"#718096", marginTop:8 }}>{status}</div>}
+        </div>
+      );
+    }
+
+    /* ============================================================
+       현장(프로젝트) 선택 화면 / PIN 게이트
+       ============================================================ */
+
+    function ProjectSelector({ sites, onSelect, onAdd }) {
+      const [name, setName] = useState("");
+      const [addr, setAddr] = useState("");
+      const submit = () => {
+        if (!name.trim()) return;
+        onAdd(name.trim(), addr.trim());
+        setName(""); setAddr("");
+      };
+      return (
+        <div className="site-select-wrap">
+          <h2>현장을 선택하세요</h2>
+          <div className="sub">M Design Works · 현장 관리</div>
+          <div className="site-card-list">
+            {sites.length === 0 && (
+              <div style={{ color:"#9090a8", fontSize:13, textAlign:"center", padding:"8px 0" }}>등록된 현장이 없습니다. 아래에서 추가하세요.</div>
+            )}
+            {sites.map(s => (
+              <div key={s.id} className="site-card" onClick={()=>onSelect(s.id)}>
+                <div>
+                  <div className="name">{s.name}</div>
+                  {s.address && <div className="addr">{s.address}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="site-add-form" style={{ flexDirection:"column", gap:8 }}>
+            <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="새 현장명 (예: 선기동698 리모델링)" />
+            <input value={addr} onChange={e=>setAddr(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="주소 (선택)" />
+            <button onClick={submit}>+ 현장 추가</button>
+          </div>
+        </div>
+      );
+    }
+
+    function PinGate({ siteName, pin, onUnlock, onBack }) {
+      const [val, setVal] = useState("");
+      const [err, setErr] = useState(false);
+      const submit = () => {
+        if (val === pin) onUnlock();
+        else { setErr(true); setVal(""); }
+      };
+      return (
+        <div className="site-select-wrap">
+          <h2>🔒 {siteName}</h2>
+          <div className="sub">현장 PIN을 입력하세요</div>
+          <div className="site-add-form" style={{ marginBottom:8 }}>
+            <input type="password" inputMode="numeric" autoFocus value={val}
+              onChange={e=>{ setVal(e.target.value.replace(/[^0-9]/g,"")); setErr(false); }}
+              onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="PIN" />
+            <button onClick={submit}>확인</button>
+          </div>
+          {err && <div style={{ color:"#feb2b2", fontSize:12, marginBottom:8 }}>PIN이 일치하지 않습니다.</div>}
+          <button className="switch-site-btn" onClick={onBack}>← 다른 현장 선택</button>
+        </div>
+      );
+    }
+
+    /* ============================================================
+       앱 셸 — 5개 탭 네비게이션
+       ============================================================ */
+
+    const TABS = [
+      { key: "schedule",  label: "공정표",   icon: "📅", Component: ScheduleTab },
+      { key: "dailylog",  label: "작업일지", icon: "📝", Component: DailyLogTab },
+      { key: "checklist", label: "체크리스트", icon: "✅", Component: ChecklistTab },
+      { key: "cost",      label: "비용",     icon: "💰", Component: CostTab },
+      { key: "settings",  label: "설정",     icon: "⚙️", Component: SettingsTab },
+    ];
+
+    function App() {
+      const [tab, setTab] = useState(() => lsLoad("activeTab") || "checklist");
+      const [tomorrowTasks, setTomorrowTasks] = useState([]);
+      const [bannerOpen, setBannerOpen] = useState(false);
+      const [sites, setSites] = useState(null); // null = 로딩 중
+      const [activeSiteId, setActiveSiteId] = useState(() => lsLoad("activeSiteId"));
+      const [siteSettings, setSiteSettings] = useState(undefined); // undefined = 로딩 중
+      const [unlocked, setUnlocked] = useState(() => {
+        try { return JSON.parse(sessionStorage.getItem("unlockedSites") || "[]"); } catch { return []; }
+      });
+
+      useEffect(() => { lsSave("activeTab", tab); }, [tab]);
+
+      // 현장 목록 로드 (data/main.sites 재사용)
+      useEffect(() => {
+        (async () => {
+          const cloud = await cloudLoad();
+          const list = cloud?.sites || lsLoad("sites") || [];
+          setSites(list);
+          if (activeSiteId && !list.some(s => s.id === activeSiteId)) {
+            setActiveSiteId(null);
+            lsSave("activeSiteId", null);
+          }
+        })();
+      }, []);
+
+      // 현재 현장의 siteSettings 로드 (PIN/알림/예산 등)
+      useEffect(() => {
+        if (!activeSiteId) { setSiteSettings(undefined); return; }
+        setSiteSettings(undefined);
+        (async () => setSiteSettings(await getSiteSettings(activeSiteId)))();
+      }, [activeSiteId]);
+
+      // 다음날 공정 알림 (현재 현장 기준)
+      useEffect(() => {
+        if (!activeSiteId) { setTomorrowTasks([]); setBannerOpen(false); return; }
+        (async () => {
+          const [data, settings] = await Promise.all([fetchCollection("schedule", activeSiteId), getSiteSettings(activeSiteId)]);
+          const notifyEnabled = settings?.notifyEnabled !== false;
+          const upcoming = notifyEnabled ? data.filter(t => t.status !== "done" && t.startDate <= tomorrow && (t.endDate||t.startDate) >= tomorrow) : [];
+          setTomorrowTasks(upcoming);
+          const dismissedFor = lsLoad("alertDismissedDate_" + activeSiteId);
+          setBannerOpen(upcoming.length > 0 && dismissedFor !== today);
+        })();
+      }, [activeSiteId]);
+
+      const dismissBanner = () => {
+        setBannerOpen(false);
+        lsSave("alertDismissedDate_" + activeSiteId, today);
+      };
+
+      const persistSites = async (newSites) => {
+        setSites(newSites);
+        lsSave("sites", newSites);
+        const cloud = await cloudLoad();
+        await cloudSave(newSites, cloud?.logs || {});
+      };
+
+      const selectSite = (id) => {
+        setActiveSiteId(id);
+        lsSave("activeSiteId", id);
+      };
+
+      const addSite = async (name, address) => {
+        const id = newId("site");
+        const newSites = [...(sites||[]), { id, name, address, createdAt: new Date().toISOString() }];
+        await persistSites(newSites);
+        if (address) await saveSiteSettings(id, { address });
+        selectSite(id);
+      };
+
+      const renameSite = async (id, name) => {
+        const newSites = (sites||[]).map(s => s.id===id ? { ...s, name } : s);
+        await persistSites(newSites);
+      };
+
+      const deleteSite = async (id) => {
+        const newSites = (sites||[]).filter(s => s.id !== id);
+        await persistSites(newSites);
+        setActiveSiteId(null);
+        lsSave("activeSiteId", null);
+      };
+
+      const switchSite = () => {
+        setActiveSiteId(null);
+        lsSave("activeSiteId", null);
+      };
+
+      const unlockSite = (id) => {
+        const next = [...new Set([...unlocked, id])];
+        setUnlocked(next);
+        try { sessionStorage.setItem("unlockedSites", JSON.stringify(next)); } catch {}
+      };
+
+      if (sites === null) {
+        return <div style={{ minHeight:"100vh", background:"#1a1a2e" }} />;
+      }
+
+      const activeSite = sites.find(s => s.id === activeSiteId);
+
+      if (!activeSiteId || !activeSite) {
+        return (
+          <>
+            <ToastHost />
+            <ProjectSelector sites={sites} onSelect={selectSite} onAdd={addSite} />
+          </>
+        );
+      }
+
+      if (siteSettings && siteSettings.pin && !unlocked.includes(activeSiteId)) {
+        return (
+          <>
+            <ToastHost />
+            <PinGate siteName={activeSite.name} pin={siteSettings.pin} onUnlock={()=>unlockSite(activeSiteId)} onBack={switchSite} />
+          </>
+        );
+      }
+
+      const active = TABS.find(t => t.key === tab) || TABS[2];
+      const ActiveComponent = active.Component;
+
+      return (
+        <SiteContext.Provider value={{ siteId: activeSiteId, siteName: activeSite.name, sites, addSite, renameSite, deleteSite, switchSite }}>
+          <ToastHost />
+          <div className="app-header">
+            <div>
+              <div className="title">M Design Works · 현장 관리</div>
+              <div className="subtitle">{activeSite.name} · {active.label}</div>
+            </div>
+            <button className="switch-site-btn" onClick={switchSite}>🏗 현장 변경</button>
+          </div>
+
+          {bannerOpen && (
+            <div className="next-process-banner">
+              <span className="badge">내일 예정</span>
+              <span className="msg">{tomorrowTasks.map(t=>t.name).join(", ")} {tomorrowTasks.length>1 ? `(${tomorrowTasks.length}건)` : "공정이 시작됩니다"}</span>
+              <button className="close" onClick={dismissBanner}>✕</button>
+            </div>
+          )}
+
+          <div className="app-content">
+            <ActiveComponent />
+          </div>
+
+          <div className="tabbar">
+            {TABS.map(t => (
+              <button key={t.key} className={tab===t.key ? "active" : ""} onClick={() => setTab(t.key)}>
+                <span className="ic">{t.icon}{t.key==="schedule" && tomorrowTasks.length>0 && <span className="dot" />}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </SiteContext.Provider>
+      );
+    }
 
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
