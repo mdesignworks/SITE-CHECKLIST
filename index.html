@@ -1288,7 +1288,10 @@
         return (
           <>
           <div className="placeholder-wrap">
-            <div style={dl.sectionTitle}>{form.id ? "작업일지 수정" : "새 작업일지"}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+              <button onClick={()=>setView("list")} style={{ background:"none", border:"none", fontSize:22, color:"#1a1a2e", cursor:"pointer", padding:"0 4px 0 0", lineHeight:1 }}>←</button>
+              <div style={{ ...dl.sectionTitle, marginBottom:0 }}>{form.id ? "작업일지 수정" : "새 작업일지"}</div>
+            </div>
 
             <div style={dl.card}>
               <div style={dl.sectionTitle}>✨ AI 자동분류</div>
@@ -1584,6 +1587,10 @@
       const remaining = budget - totalCost;
       const usedPct = budget ? Math.round(totalCost/budget*100) : null;
 
+      const sortedLogs = useMemo(() => [...logs].sort((a,b) => b.date.localeCompare(a.date) || (b.id||"").localeCompare(a.id||"")), [logs]);
+      const [expandedLogs, setExpandedLogs] = useState({});
+      const toggleLog = (id) => setExpandedLogs(e => ({ ...e, [id]: !e[id] }));
+
       if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
 
       return (
@@ -1696,6 +1703,88 @@
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* 날짜별 비용 내역 */}
+          <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>날짜별 비용 내역</div>
+            {sortedLogs.length === 0 ? (
+              <div style={{ fontSize:12, color:"#a0aec0", textAlign:"center", padding:"10px 0" }}>등록된 비용 데이터가 없습니다.</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {sortedLogs.map(log => {
+                  const open = !!expandedLogs[log.id];
+                  const oc = log.otherCosts || {};
+                  const hasOther = (Number(oc.meal)||0) + (Number(oc.delivery)||0) + (Number(oc.etc)||0) > 0;
+                  const hasWorkers = (log.workers||[]).some(w=>w.role);
+                  const hasMaterials = (log.materials||[]).some(m=>m.name);
+                  const hasEquipment = (log.equipment||[]).some(e=>e.name);
+                  return (
+                    <div key={log.id} style={{ border:"1px solid #f0f0f3", borderRadius:8 }}>
+                      <div onClick={()=>toggleLog(log.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", cursor:"pointer" }}>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>{dayLabel(log.date)}</div>
+                          <div style={{ fontSize:11, color:"#a0aec0", marginTop:2 }}>{log.process}{log.area ? ` · ${log.area}` : ""}</div>
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontSize:14, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(log.totalCost)}</span>
+                          <span style={{ fontSize:11, color:"#a0aec0" }}>{open ? "▲" : "▼"}</span>
+                        </div>
+                      </div>
+                      {open && (
+                        <div style={{ padding:"0 12px 12px", display:"flex", flexDirection:"column", gap:8, borderTop:"1px solid #f7f8fa" }}>
+                          {hasWorkers && (
+                            <div style={{ marginTop:8 }}>
+                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.labor, marginBottom:4 }}>👷 인건비</div>
+                              {log.workers.filter(w=>w.role).map((w,i) => (
+                                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
+                                  <span>{w.role} {w.count}명</span>
+                                  <span>{fmtMoney(w.laborCost)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {hasMaterials && (
+                            <div style={{ marginTop: hasWorkers?0:8 }}>
+                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.material, marginBottom:4 }}>📦 자재비</div>
+                              {log.materials.filter(m=>m.name).map((m,i) => (
+                                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
+                                  <span>{m.name} {m.qty}{m.unit} × {fmtMoney(m.unitPrice)}</span>
+                                  <span>{fmtMoney((Number(m.qty)||0)*(Number(m.unitPrice)||0))}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {hasEquipment && (
+                            <div style={{ marginTop: (hasWorkers||hasMaterials)?0:8 }}>
+                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.equipment, marginBottom:4 }}>🛠 장비비</div>
+                              {log.equipment.filter(e=>e.name).map((e,i) => (
+                                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
+                                  <span>{e.name}</span>
+                                  <span>{fmtMoney(e.cost)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {hasOther && (
+                            <div style={{ marginTop: (hasWorkers||hasMaterials||hasEquipment)?0:8 }}>
+                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.other, marginBottom:4 }}>💵 기타비용</div>
+                              {Number(oc.meal)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>식대</span><span>{fmtMoney(oc.meal)}</span></div>}
+                              {Number(oc.delivery)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>운반비</span><span>{fmtMoney(oc.delivery)}</span></div>}
+                              {Number(oc.etc)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>기타</span><span>{fmtMoney(oc.etc)}</span></div>}
+                            </div>
+                          )}
+                          {!hasWorkers && !hasMaterials && !hasEquipment && !hasOther && (
+                            <div style={{ fontSize:12, color:"#a0aec0", padding:"8px 0" }}>등록된 세부 비용이 없습니다.</div>
+                          )}
+                          {log.note && <div style={{ fontSize:11, color:"#a0aec0", borderTop:"1px solid #f0f0f3", paddingTop:6 }}>📝 {log.note}</div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
