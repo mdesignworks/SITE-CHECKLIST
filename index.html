@@ -1345,8 +1345,8 @@
               {form.workers.map((w,i) => (
                 <div key={i} style={dl.row}>
                   <input value={w.role} onChange={e=>updateArr("workers",i,"role",e.target.value)} placeholder="역할(예: 목수)" style={{...dl.input, flex:2}} />
-                  <input type="number" value={w.count} onChange={e=>updateArr("workers",i,"count",e.target.value)} placeholder="인원" style={{...dl.input, flex:1}} />
-                  <input type="number" value={w.laborCost} onChange={e=>updateArr("workers",i,"laborCost",e.target.value)} placeholder="인건비(합계)" style={{...dl.input, flex:2}} />
+                  <input type="number" value={w.count} onChange={e=>updateArr("workers",i,"count",e.target.value)} onFocus={e=>e.target.select()} placeholder="인원" style={{...dl.input, flex:1}} />
+                  <input type="number" value={w.laborCost} onChange={e=>updateArr("workers",i,"laborCost",e.target.value)} onFocus={e=>e.target.select()} placeholder="인건비(합계)" style={{...dl.input, flex:2}} />
                   <button onClick={()=>removeRow("workers",i)} style={dl.removeBtn}>×</button>
                 </div>
               ))}
@@ -1359,8 +1359,8 @@
                 <div key={i} style={dl.row}>
                   <input value={m.name} onChange={e=>updateArr("materials",i,"name",e.target.value)} placeholder="자재명" style={{...dl.input, flex:2}} />
                   <input value={m.unit} onChange={e=>updateArr("materials",i,"unit",e.target.value)} placeholder="단위" style={{...dl.input, flex:1}} />
-                  <input type="number" value={m.qty} onChange={e=>updateArr("materials",i,"qty",e.target.value)} placeholder="수량" style={{...dl.input, flex:1}} />
-                  <input type="number" value={m.unitPrice} onChange={e=>updateArr("materials",i,"unitPrice",e.target.value)} placeholder="단가" style={{...dl.input, flex:1}} />
+                  <input type="number" value={m.qty} onChange={e=>updateArr("materials",i,"qty",e.target.value)} onFocus={e=>e.target.select()} placeholder="수량" style={{...dl.input, flex:1}} />
+                  <input type="number" value={m.unitPrice} onChange={e=>updateArr("materials",i,"unitPrice",e.target.value)} onFocus={e=>e.target.select()} placeholder="단가" style={{...dl.input, flex:1}} />
                   <button onClick={()=>removeRow("materials",i)} style={dl.removeBtn}>×</button>
                 </div>
               ))}
@@ -1372,7 +1372,7 @@
               {form.equipment.map((e2,i) => (
                 <div key={i} style={dl.row}>
                   <input value={e2.name} onChange={e=>updateArr("equipment",i,"name",e.target.value)} placeholder="장비명(예: 리프트)" style={{...dl.input, flex:2}} />
-                  <input type="number" value={e2.cost} onChange={e=>updateArr("equipment",i,"cost",e.target.value)} placeholder="임대비" style={{...dl.input, flex:1}} />
+                  <input type="number" value={e2.cost} onChange={e=>updateArr("equipment",i,"cost",e.target.value)} onFocus={e=>e.target.select()} placeholder="임대비" style={{...dl.input, flex:1}} />
                   <button onClick={()=>removeRow("equipment",i)} style={dl.removeBtn}>×</button>
                 </div>
               ))}
@@ -1384,7 +1384,7 @@
               {form.otherCosts.map((o,i) => (
                 <div key={i} style={dl.row}>
                   <input value={o.name} onChange={e=>updateArr("otherCosts",i,"name",e.target.value)} placeholder="항목명(예: 식대, 주차비)" style={{...dl.input, flex:2}} />
-                  <input type="number" value={o.amount} onChange={e=>updateArr("otherCosts",i,"amount",e.target.value)} placeholder="금액" style={{...dl.input, flex:1}} />
+                  <input type="number" value={o.amount} onChange={e=>updateArr("otherCosts",i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
                   <button onClick={()=>removeRow("otherCosts",i)} style={dl.removeBtn}>×</button>
                 </div>
               ))}
@@ -1697,7 +1697,7 @@
             </div>
             {editingBudget ? (
               <div style={{ display:"flex", gap:6 }}>
-                <input type="number" value={budgetInput} onChange={e=>setBudgetInput(e.target.value)} placeholder="예산 입력 (원)" style={{ flex:1, padding:"10px 12px", fontSize:14, borderRadius:8, border:"1.5px solid #e2e8f0", outline:"none", color:"#2d3748" }} />
+                <input type="number" value={budgetInput} onChange={e=>setBudgetInput(e.target.value)} onFocus={e=>e.target.select()} placeholder="예산 입력 (원)" style={{ flex:1, padding:"10px 12px", fontSize:14, borderRadius:8, border:"1.5px solid #e2e8f0", outline:"none", color:"#2d3748" }} />
                 <button onClick={saveBudget} style={{ background:"#FF6B35", color:"#fff", border:"none", borderRadius:8, padding:"0 16px", fontSize:13, fontWeight:700, cursor:"pointer" }}>저장</button>
               </div>
             ) : budget ? (
@@ -1896,9 +1896,9 @@
                 <input value={form.spec} onChange={e=>setForm(f=>({...f,spec:e.target.value}))} placeholder="규격" style={{...dl.input, flex:1}} />
               </div>
               <div style={{ display:"flex", gap:6, marginBottom:6 }}>
-                <input type="number" value={form.qty} onChange={e=>setForm(f=>({...f,qty:e.target.value}))} placeholder="수량" style={{...dl.input, flex:1}} />
+                <input type="number" value={form.qty} onChange={e=>setForm(f=>({...f,qty:e.target.value}))} onFocus={e=>e.target.select()} placeholder="수량" style={{...dl.input, flex:1}} />
                 <input value={form.unit} onChange={e=>setForm(f=>({...f,unit:e.target.value}))} placeholder="단위" style={{...dl.input, flex:1}} />
-                <input type="number" value={form.minQty} onChange={e=>setForm(f=>({...f,minQty:e.target.value}))} placeholder="최소 보유량" style={{...dl.input, flex:1}} />
+                <input type="number" value={form.minQty} onChange={e=>setForm(f=>({...f,minQty:e.target.value}))} onFocus={e=>e.target.select()} placeholder="최소 보유량" style={{...dl.input, flex:1}} />
               </div>
               <input value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="메모 (업체, 예상 입고일 등)" style={{...dl.input, marginBottom:6}} />
               <button onClick={addItem} style={{ ...dl.primaryBtn, padding:"10px 0", fontSize:13 }}>추가</button>
@@ -2178,7 +2178,7 @@
                 <input type="date" value={form.periodEnd} onChange={e=>setForm(f=>({...f,periodEnd:e.target.value}))} style={{...dl.input, flex:1}} />
               </div>
               <input value={form.client} onChange={e=>setForm(f=>({...f,client:e.target.value}))} placeholder="발주처" style={dl.input} />
-              <input type="number" value={form.budget} onChange={e=>setForm(f=>({...f,budget:e.target.value}))} placeholder="예산 (원)" style={dl.input} />
+              <input type="number" value={form.budget} onChange={e=>setForm(f=>({...f,budget:e.target.value}))} onFocus={e=>e.target.select()} placeholder="예산 (원)" style={dl.input} />
             </div>
           </div>
 
@@ -2187,8 +2187,8 @@
             <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>현장 날씨 위치</div>
             <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>비워두면 기본 위치(경북 구미시)로 표시됩니다. 위도/경도는 지도 앱에서 좌표를 검색해 입력하세요.</div>
             <div style={{ display:"flex", gap:6 }}>
-              <input type="number" step="0.0001" value={form.lat} onChange={e=>setForm(f=>({...f,lat:e.target.value}))} placeholder="위도 (예: 36.12)" style={{...dl.input, flex:1}} />
-              <input type="number" step="0.0001" value={form.lon} onChange={e=>setForm(f=>({...f,lon:e.target.value}))} placeholder="경도 (예: 128.34)" style={{...dl.input, flex:1}} />
+              <input type="number" step="0.0001" value={form.lat} onChange={e=>setForm(f=>({...f,lat:e.target.value}))} onFocus={e=>e.target.select()} placeholder="위도 (예: 36.12)" style={{...dl.input, flex:1}} />
+              <input type="number" step="0.0001" value={form.lon} onChange={e=>setForm(f=>({...f,lon:e.target.value}))} onFocus={e=>e.target.select()} placeholder="경도 (예: 128.34)" style={{...dl.input, flex:1}} />
             </div>
           </div>
 
