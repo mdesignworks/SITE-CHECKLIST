@@ -1129,16 +1129,32 @@
       workers: [{ role: "", count: 1, laborCost: 0 }],
       materials: [{ name: "", unit: "", qty: 0, unitPrice: 0 }],
       equipment: [{ name: "", cost: 0 }],
-      otherCosts: { meal: 0, delivery: 0, etc: 0 },
+      otherCosts: [{ name: "", amount: 0 }],
       note: "",
       photos: [],
     });
+
+    // otherCosts: 신규 형식은 [{name, amount}] 배열. 기존 {meal,delivery,etc} 형식 문서도 호환 처리.
+    function normalizeOtherCosts(oc) {
+      if (Array.isArray(oc)) return oc;
+      if (oc && typeof oc === "object") {
+        const out = [];
+        if (Number(oc.meal)) out.push({ name: "식대", amount: Number(oc.meal) });
+        if (Number(oc.delivery)) out.push({ name: "운반비", amount: Number(oc.delivery) });
+        if (Number(oc.etc)) out.push({ name: "기타", amount: Number(oc.etc) });
+        return out;
+      }
+      return [];
+    }
+    function otherCostsTotal(oc) {
+      return normalizeOtherCosts(oc).reduce((s,o) => s + (Number(o.amount)||0), 0);
+    }
 
     function calcTotal(f) {
       const workers = (f.workers||[]).reduce((s,w) => s + (Number(w.laborCost)||0), 0);
       const materials = (f.materials||[]).reduce((s,m) => s + (Number(m.qty)||0) * (Number(m.unitPrice)||0), 0);
       const equipment = (f.equipment||[]).reduce((s,e) => s + (Number(e.cost)||0), 0);
-      const other = (Number(f.otherCosts?.meal)||0) + (Number(f.otherCosts?.delivery)||0) + (Number(f.otherCosts?.etc)||0);
+      const other = otherCostsTotal(f.otherCosts);
       return workers + materials + equipment + other;
     }
 
@@ -1182,7 +1198,7 @@
               workers: (result.workers && result.workers.length) ? result.workers.map(w => ({ role: w.role||"", count: Number(w.count)||1, laborCost: Number(w.laborCost)||0 })) : f.workers,
               materials: (result.materials && result.materials.length) ? result.materials.map(m => ({ name: m.name||"", unit: m.unit||"", qty: Number(m.qty)||0, unitPrice: Number(m.unitPrice)||0 })) : f.materials,
               equipment: (result.equipment && result.equipment.length) ? result.equipment.map(e => ({ name: e.name||"", cost: Number(e.cost)||0 })) : f.equipment,
-              otherCosts: result.otherCosts ? { meal: Number(result.otherCosts.meal)||0, delivery: Number(result.otherCosts.delivery)||0, etc: Number(result.otherCosts.etc)||0 } : f.otherCosts,
+              otherCosts: result.otherCosts && normalizeOtherCosts(result.otherCosts).length ? normalizeOtherCosts(result.otherCosts) : f.otherCosts,
               note: result.note || f.note,
             };
           });
@@ -1221,7 +1237,7 @@
           workers: log.workers?.length ? log.workers : emptyForm().workers,
           materials: log.materials?.length ? log.materials : emptyForm().materials,
           equipment: log.equipment?.length ? log.equipment : emptyForm().equipment,
-          otherCosts: { meal:0, delivery:0, etc:0, ...(log.otherCosts||{}) },
+          otherCosts: normalizeOtherCosts(log.otherCosts).length ? normalizeOtherCosts(log.otherCosts) : emptyForm().otherCosts,
           photos: (log.photos||[]).map(url => ({ url })),
         });
         setRemovedPhotos([]);
@@ -1264,7 +1280,7 @@
           workers: form.workers.filter(w => w.role.trim() || (Number(w.laborCost)||0) > 0),
           materials: form.materials.filter(m => m.name.trim() || ((Number(m.qty)||0) * (Number(m.unitPrice)||0)) > 0),
           equipment: form.equipment.filter(e => e.name.trim() || (Number(e.cost)||0) > 0),
-          otherCosts: form.otherCosts,
+          otherCosts: form.otherCosts.filter(o => o.name.trim() || (Number(o.amount)||0) > 0),
           note: form.note,
           totalCost,
           photos: photoUrls,
@@ -1365,20 +1381,14 @@
 
             <div style={dl.card}>
               <div style={dl.sectionTitle}>💵 기타비용</div>
-              <div style={dl.row}>
-                <div style={{flex:1}}>
-                  <label style={dl.label}>식대</label>
-                  <input type="number" value={form.otherCosts.meal} onChange={e=>setForm(f=>({...f,otherCosts:{...f.otherCosts,meal:e.target.value}}))} style={dl.input} />
+              {form.otherCosts.map((o,i) => (
+                <div key={i} style={dl.row}>
+                  <input value={o.name} onChange={e=>updateArr("otherCosts",i,"name",e.target.value)} placeholder="항목명(예: 식대, 주차비)" style={{...dl.input, flex:2}} />
+                  <input type="number" value={o.amount} onChange={e=>updateArr("otherCosts",i,"amount",e.target.value)} placeholder="금액" style={{...dl.input, flex:1}} />
+                  <button onClick={()=>removeRow("otherCosts",i)} style={dl.removeBtn}>×</button>
                 </div>
-                <div style={{flex:1}}>
-                  <label style={dl.label}>운반비</label>
-                  <input type="number" value={form.otherCosts.delivery} onChange={e=>setForm(f=>({...f,otherCosts:{...f.otherCosts,delivery:e.target.value}}))} style={dl.input} />
-                </div>
-                <div style={{flex:1}}>
-                  <label style={dl.label}>기타</label>
-                  <input type="number" value={form.otherCosts.etc} onChange={e=>setForm(f=>({...f,otherCosts:{...f.otherCosts,etc:e.target.value}}))} style={dl.input} />
-                </div>
-              </div>
+              ))}
+              <button style={dl.smallBtn} onClick={()=>addRow("otherCosts",{name:"",amount:0})}>+ 항목 추가</button>
             </div>
 
             <div style={dl.card}>
@@ -1504,8 +1514,8 @@
     const COST_LABELS = { labor:"인건비", material:"자재비", equipment:"장비비", other:"기타" };
 
     function LogCostDetail({ log }) {
-      const oc = log.otherCosts || {};
-      const hasOther = (Number(oc.meal)||0) + (Number(oc.delivery)||0) + (Number(oc.etc)||0) > 0;
+      const otherList = normalizeOtherCosts(log.otherCosts);
+      const hasOther = otherList.some(o=>(Number(o.amount)||0)>0);
       const hasWorkers = (log.workers||[]).some(w=>w.role || (Number(w.laborCost)||0)>0);
       const hasMaterials = (log.materials||[]).some(m=>m.name || ((Number(m.qty)||0)*(Number(m.unitPrice)||0))>0);
       const hasEquipment = (log.equipment||[]).some(e=>e.name || (Number(e.cost)||0)>0);
@@ -1547,9 +1557,9 @@
           {hasOther && (
             <div>
               <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.other, marginBottom:4 }}>💵 기타비용</div>
-              {Number(oc.meal)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>식대</span><span>{fmtMoney(oc.meal)}</span></div>}
-              {Number(oc.delivery)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>운반비</span><span>{fmtMoney(oc.delivery)}</span></div>}
-              {Number(oc.etc)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>기타</span><span>{fmtMoney(oc.etc)}</span></div>}
+              {otherList.filter(o=>(Number(o.amount)||0)>0).map((o,i) => (
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>{o.name || "기타"}</span><span>{fmtMoney(o.amount)}</span></div>
+              ))}
             </div>
           )}
           {!hasWorkers && !hasMaterials && !hasEquipment && !hasOther && (
@@ -1602,8 +1612,7 @@
           b.labor += (l.workers||[]).reduce((s,w) => s + (Number(w.laborCost)||0), 0);
           b.material += (l.materials||[]).reduce((s,m) => s + (Number(m.qty)||0) * (Number(m.unitPrice)||0), 0);
           b.equipment += (l.equipment||[]).reduce((s,e) => s + (Number(e.cost)||0), 0);
-          const oc = l.otherCosts||{};
-          b.other += (Number(oc.meal)||0) + (Number(oc.delivery)||0) + (Number(oc.etc)||0);
+          b.other += otherCostsTotal(l.otherCosts);
         });
         return b;
       }, [logs]);
@@ -2038,7 +2047,7 @@
             인건비: (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0),
             자재비: (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0),
             장비비: (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0),
-            기타비용: (Number(l.otherCosts?.meal)||0)+(Number(l.otherCosts?.delivery)||0)+(Number(l.otherCosts?.etc)||0),
+            기타비용: otherCostsTotal(l.otherCosts),
             합계: Number(l.totalCost)||0,
             비고: l.note||"",
           }));
@@ -2074,7 +2083,7 @@
             const labor = (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0);
             const material = (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0);
             const equipment = (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0);
-            const other = (Number(l.otherCosts?.meal)||0)+(Number(l.otherCosts?.delivery)||0)+(Number(l.otherCosts?.etc)||0);
+            const other = otherCostsTotal(l.otherCosts);
             map[key].인건비 += labor; map[key].자재비 += material; map[key].장비비 += equipment; map[key].기타비용 += other;
             map[key].합계 += labor+material+equipment+other;
           });
@@ -2273,7 +2282,7 @@
             인건비: (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0),
             자재비: (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0),
             장비비: (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0),
-            기타비용: (Number(l.otherCosts?.meal)||0)+(Number(l.otherCosts?.delivery)||0)+(Number(l.otherCosts?.etc)||0),
+            기타비용: otherCostsTotal(l.otherCosts),
             합계: Number(l.totalCost)||0,
             비고: l.note||"",
             사진: (l.photos||[]).join(", "),
