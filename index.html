@@ -714,16 +714,16 @@
 
       useEffect(() => {
         (async () => {
-          let data = await fetchCollection("schedule", siteId);
-          if (data.length === 0) {
+          const [data0, settings] = await Promise.all([fetchCollection("schedule", siteId), getSiteSettings(siteId)]);
+          let data = data0;
+          // 최초 1회만 시드 데이터 생성 (이미 시드한 현장은 다시 채우지 않음 — 삭제한 공정이 되살아나는 것 방지)
+          if (data.length === 0 && !settings?.scheduleSeeded) {
             for (const t of SCHEDULE_SEED) await setDoc("schedule", `${siteId}_${t.id}`, { ...t, siteId });
             data = SCHEDULE_SEED.map(t => ({ ...t, id: `${siteId}_${t.id}`, siteId }));
+            await saveSiteSettings(siteId, { scheduleSeeded: true });
           }
           setTasks(data);
           setLoaded(true);
-        })();
-        (async () => {
-          const settings = await getSiteSettings(siteId);
           setWeather(await fetchWeather(settings?.lat, settings?.lon));
         })();
       }, [siteId]);
