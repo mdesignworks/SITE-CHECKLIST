@@ -1503,6 +1503,63 @@
     const COST_COLORS = { labor:"#FF6B35", material:"#4472C4", equipment:"#48BB78", other:"#A0AEC0" };
     const COST_LABELS = { labor:"인건비", material:"자재비", equipment:"장비비", other:"기타" };
 
+    function LogCostDetail({ log }) {
+      const oc = log.otherCosts || {};
+      const hasOther = (Number(oc.meal)||0) + (Number(oc.delivery)||0) + (Number(oc.etc)||0) > 0;
+      const hasWorkers = (log.workers||[]).some(w=>w.role || (Number(w.laborCost)||0)>0);
+      const hasMaterials = (log.materials||[]).some(m=>m.name || ((Number(m.qty)||0)*(Number(m.unitPrice)||0))>0);
+      const hasEquipment = (log.equipment||[]).some(e=>e.name || (Number(e.cost)||0)>0);
+      return (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {hasWorkers && (
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.labor, marginBottom:4 }}>👷 인건비</div>
+              {log.workers.filter(w=>w.role || (Number(w.laborCost)||0)>0).map((w,i) => (
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
+                  <span>{w.role || "인력"} {w.count}명</span>
+                  <span>{fmtMoney(w.laborCost)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {hasMaterials && (
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.material, marginBottom:4 }}>📦 자재비</div>
+              {log.materials.filter(m=>m.name || ((Number(m.qty)||0)*(Number(m.unitPrice)||0))>0).map((m,i) => (
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
+                  <span>{m.name || "자재"} {m.qty}{m.unit} × {fmtMoney(m.unitPrice)}</span>
+                  <span>{fmtMoney((Number(m.qty)||0)*(Number(m.unitPrice)||0))}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {hasEquipment && (
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.equipment, marginBottom:4 }}>🛠 장비비</div>
+              {log.equipment.filter(e=>e.name || (Number(e.cost)||0)>0).map((e,i) => (
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
+                  <span>{e.name || "장비"}</span>
+                  <span>{fmtMoney(e.cost)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {hasOther && (
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.other, marginBottom:4 }}>💵 기타비용</div>
+              {Number(oc.meal)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>식대</span><span>{fmtMoney(oc.meal)}</span></div>}
+              {Number(oc.delivery)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>운반비</span><span>{fmtMoney(oc.delivery)}</span></div>}
+              {Number(oc.etc)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>기타</span><span>{fmtMoney(oc.etc)}</span></div>}
+            </div>
+          )}
+          {!hasWorkers && !hasMaterials && !hasEquipment && !hasOther && (
+            <div style={{ fontSize:12, color:"#a0aec0", padding:"4px 0" }}>등록된 세부 비용이 없습니다.</div>
+          )}
+          {log.note && <div style={{ fontSize:11, color:"#a0aec0", borderTop:"1px solid #f0f0f3", paddingTop:6 }}>📝 {log.note}</div>}
+        </div>
+      );
+    }
+
     function CostTab() {
       const { siteId } = React.useContext(SiteContext);
       const [logs, setLogs] = useState([]);
@@ -1569,6 +1626,15 @@
         return Object.entries(map).sort((a,b) => b[1]-a[1]);
       }, [logs]);
       const maxProcessCost = byProcess.length ? byProcess[0][1] : 0;
+
+      const logsByProcess = useMemo(() => {
+        const map = {};
+        logs.forEach(l => { const key = l.process || "기타"; (map[key] = map[key] || []).push(l); });
+        Object.values(map).forEach(arr => arr.sort((a,b) => b.date.localeCompare(a.date) || (b.id||"").localeCompare(a.id||"")));
+        return map;
+      }, [logs]);
+      const [expandedProcess, setExpandedProcess] = useState(null);
+      const toggleProcess = (name) => setExpandedProcess(p => p === name ? null : name);
 
       const cumulative = useMemo(() => {
         const map = {};
@@ -1694,17 +1760,36 @@
               <div style={{ fontSize:12, color:"#a0aec0", textAlign:"center", padding:"10px 0" }}>등록된 비용 데이터가 없습니다.</div>
             ) : (
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {byProcess.map(([name, cost]) => (
+                {byProcess.map(([name, cost]) => {
+                  const open = expandedProcess === name;
+                  return (
                   <div key={name}>
-                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:11.5, color:"#4a5568", marginBottom:3 }}>
-                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"70%" }}>{name}</span>
-                      <span style={{ fontWeight:700, color:"#1a1a2e" }}>{fmtMoney(cost)}</span>
+                    <div onClick={()=>toggleProcess(name)} style={{ display:"flex", justifyContent:"space-between", fontSize:11.5, color:"#4a5568", marginBottom:3, cursor:"pointer", alignItems:"center", gap:6 }}>
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"60%" }}>{name}</span>
+                      <span style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <span style={{ fontWeight:700, color:"#1a1a2e" }}>{fmtMoney(cost)}</span>
+                        <span style={{ fontSize:10, color:"#a0aec0" }}>{open ? "▲" : "▼"}</span>
+                      </span>
                     </div>
                     <div style={{ height:8, borderRadius:4, background:"#edf2f7", overflow:"hidden" }}>
                       <div style={{ width:`${maxProcessCost ? (cost/maxProcessCost*100) : 0}%`, height:"100%", background:"#FF6B35", borderRadius:4 }} />
                     </div>
+                    {open && (
+                      <div style={{ marginTop:8, display:"flex", flexDirection:"column", gap:6 }}>
+                        {(logsByProcess[name]||[]).map(log => (
+                          <div key={log.id} style={{ background:"#f7f8fa", borderRadius:8, padding:"8px 10px" }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:12, fontWeight:700, color:"#1a1a2e", marginBottom:6 }}>
+                              <span>{dayLabel(log.date)}{log.area ? ` · ${log.area}` : ""}</span>
+                              <span style={{ color:"#FF6B35" }}>{fmtMoney(log.totalCost)}</span>
+                            </div>
+                            <LogCostDetail log={log} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1718,11 +1803,6 @@
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 {sortedLogs.map(log => {
                   const open = !!expandedLogs[log.id];
-                  const oc = log.otherCosts || {};
-                  const hasOther = (Number(oc.meal)||0) + (Number(oc.delivery)||0) + (Number(oc.etc)||0) > 0;
-                  const hasWorkers = (log.workers||[]).some(w=>w.role || (Number(w.laborCost)||0)>0);
-                  const hasMaterials = (log.materials||[]).some(m=>m.name || ((Number(m.qty)||0)*(Number(m.unitPrice)||0))>0);
-                  const hasEquipment = (log.equipment||[]).some(e=>e.name || (Number(e.cost)||0)>0);
                   return (
                     <div key={log.id} style={{ border:"1px solid #f0f0f3", borderRadius:8 }}>
                       <div onClick={()=>toggleLog(log.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", cursor:"pointer" }}>
@@ -1736,52 +1816,8 @@
                         </div>
                       </div>
                       {open && (
-                        <div style={{ padding:"0 12px 12px", display:"flex", flexDirection:"column", gap:8, borderTop:"1px solid #f7f8fa" }}>
-                          {hasWorkers && (
-                            <div style={{ marginTop:8 }}>
-                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.labor, marginBottom:4 }}>👷 인건비</div>
-                              {log.workers.filter(w=>w.role || (Number(w.laborCost)||0)>0).map((w,i) => (
-                                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
-                                  <span>{w.role || "인력"} {w.count}명</span>
-                                  <span>{fmtMoney(w.laborCost)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {hasMaterials && (
-                            <div style={{ marginTop: hasWorkers?0:8 }}>
-                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.material, marginBottom:4 }}>📦 자재비</div>
-                              {log.materials.filter(m=>m.name || ((Number(m.qty)||0)*(Number(m.unitPrice)||0))>0).map((m,i) => (
-                                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
-                                  <span>{m.name || "자재"} {m.qty}{m.unit} × {fmtMoney(m.unitPrice)}</span>
-                                  <span>{fmtMoney((Number(m.qty)||0)*(Number(m.unitPrice)||0))}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {hasEquipment && (
-                            <div style={{ marginTop: (hasWorkers||hasMaterials)?0:8 }}>
-                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.equipment, marginBottom:4 }}>🛠 장비비</div>
-                              {log.equipment.filter(e=>e.name || (Number(e.cost)||0)>0).map((e,i) => (
-                                <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
-                                  <span>{e.name || "장비"}</span>
-                                  <span>{fmtMoney(e.cost)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {hasOther && (
-                            <div style={{ marginTop: (hasWorkers||hasMaterials||hasEquipment)?0:8 }}>
-                              <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.other, marginBottom:4 }}>💵 기타비용</div>
-                              {Number(oc.meal)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>식대</span><span>{fmtMoney(oc.meal)}</span></div>}
-                              {Number(oc.delivery)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>운반비</span><span>{fmtMoney(oc.delivery)}</span></div>}
-                              {Number(oc.etc)>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}><span>기타</span><span>{fmtMoney(oc.etc)}</span></div>}
-                            </div>
-                          )}
-                          {!hasWorkers && !hasMaterials && !hasEquipment && !hasOther && (
-                            <div style={{ fontSize:12, color:"#a0aec0", padding:"8px 0" }}>등록된 세부 비용이 없습니다.</div>
-                          )}
-                          {log.note && <div style={{ fontSize:11, color:"#a0aec0", borderTop:"1px solid #f0f0f3", paddingTop:6 }}>📝 {log.note}</div>}
+                        <div style={{ padding:"8px 12px 12px", borderTop:"1px solid #f7f8fa" }}>
+                          <LogCostDetail log={log} />
                         </div>
                       )}
                     </div>
