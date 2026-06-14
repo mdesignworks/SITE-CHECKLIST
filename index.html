@@ -63,7 +63,9 @@
         let q = db.collection(name);
         if (siteId) q = q.where("siteId", "==", siteId);
         const snap = await q.get();
-        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // 주의: 시드 데이터의 data.id 필드가 실제 문서 ID를 덮어쓰지 않도록 spread 순서를 맞춤
+        // (이전엔 data.id가 실제 Firestore 문서ID를 가려서 삭제가 다른 문서를 가리켜 "삭제해도 되살아나는" 문제가 있었음)
+        return snap.docs.map(d => ({ ...d.data(), id: d.id }));
       } catch(e) {
         console.warn("fetch "+name+" err", e);
         notify("데이터를 불러오지 못했습니다. 인터넷 연결을 확인해주세요.");
@@ -718,8 +720,8 @@
           let data = data0;
           // 최초 1회만 시드 데이터 생성 (이미 시드한 현장은 다시 채우지 않음 — 삭제한 공정이 되살아나는 것 방지)
           if (data.length === 0 && !settings?.scheduleSeeded) {
-            for (const t of SCHEDULE_SEED) await setDoc("schedule", `${siteId}_${t.id}`, { ...t, siteId });
-            data = SCHEDULE_SEED.map(t => ({ ...t, id: `${siteId}_${t.id}`, siteId }));
+            for (const t of SCHEDULE_SEED) { const { id: seedId, ...rest } = t; await setDoc("schedule", `${siteId}_${seedId}`, { ...rest, siteId }); }
+            data = SCHEDULE_SEED.map(t => { const { id: seedId, ...rest } = t; return { ...rest, id: `${siteId}_${seedId}`, siteId }; });
             await saveSiteSettings(siteId, { scheduleSeeded: true });
           }
           setTasks(data);
