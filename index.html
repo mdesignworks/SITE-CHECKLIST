@@ -2313,6 +2313,14 @@
         await deleteDocFn("materials", id);
       };
 
+      const quickAddFromLog = async (mat) => {
+        const id = newId("mat");
+        const data = { siteId, name: mat.name, spec:"", qty:"", unit: mat.unit||"", note:"", minQty:"", status:"필요", createdAt: new Date().toISOString() };
+        setItems(its => [...its, { id, ...data }]);
+        await setDoc("materials", id, data);
+        notify(`"${mat.name}" 발주 트래커에 추가됐습니다.`, "success");
+      };
+
       if (!loaded) return null;
 
       return (
@@ -2384,7 +2392,7 @@
                         </div>
                         {alreadyInTracker
                           ? <span style={{ fontSize:11, color:"#48BB78", fontWeight:700, flexShrink:0 }}>✓ 트래커 등록됨</span>
-                          : <button onClick={()=>{ setForm(f=>({...f, name:mat.name, unit:mat.unit||"", qty:"", spec:"", note:"", minQty:""})); setAdding(true); }} style={{ background:"none", border:"1px solid #FF6B35", color:"#FF6B35", borderRadius:6, padding:"3px 8px", fontSize:11, fontWeight:700, cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>+ 발주 추가</button>
+                          : <button onClick={()=>quickAddFromLog(mat)} style={{ background:"#FF6B35", color:"#fff", border:"none", borderRadius:6, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>+ 발주 추가</button>
                         }
                       </div>
                     );
