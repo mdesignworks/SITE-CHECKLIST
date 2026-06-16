@@ -354,16 +354,24 @@
       return <div className={"toast " + (toast.type === "success" ? "toast-ok" : "toast-err")}>{toast.msg}</div>;
     }
 
-    // 공정표 초기 공종 목록 (4단계에서 schedule 컬렉션 연동 전까지 작업일지 공정 선택용)
+    // 공정표 초기 공종 목록 (범용 건설·인테리어 공종)
     const PROCESS_LIST = [
-      "철거", "먹매김", "판넬벽 재시공", "텍스 철거", "설비 배관", "샷시 철거", "경량벽체 (LGS)",
-      "터파기", "배관 연결", "되메우기", "하스리", "분배기", "수도설비 마무리", "조적", "인방",
-      "PF보드 단열", "벽체 컷팅", "내부 칸막이", "단열 마무리", "전기 배선 1차",
-      "욕실 방수 바탕 정리", "세탁실 방수", "샷시 시공 (거실 3400×2100)", "미장 (샷시 사춤 포함)",
-      "바닥 난방 엑셀배관 설치", "방통", "미장 양생", "방수 1차", "방수 2차", "담수 테스트 (24h 이상)",
-      "타일 (욕실·현관)", "줄눈 (욕실·현관)", "목공 (천장·문틀·몰딩)", "도장/도배", "필름",
-      "바닥재 (마루/장판)", "가구", "욕실 도기·수전", "조명·스위치", "도어",
-      "실리콘·코킹", "보양 철거", "입주 청소", "준공 점검",
+      "가설공사", "철거·해체",
+      "토공사·터파기", "기초공사",
+      "조적공사", "콘크리트공사",
+      "방수공사", "단열공사",
+      "미장공사", "목공사",
+      "창호공사", "유리공사",
+      "금속공사", "타일공사",
+      "석공사", "도장공사",
+      "도배공사", "바닥공사",
+      "천장공사", "칸막이·경량벽체",
+      "설비·배관공사", "전기공사",
+      "조명공사", "소방공사",
+      "통신·약전공사", "냉난방·공조공사",
+      "위생도기·수전공사", "가구공사",
+      "조경공사", "입주청소",
+      "준공검사", "기타",
     ];
 
     // 공정표 상태별 색상
@@ -430,30 +438,30 @@
 
     // 공정표 초기 시드 데이터 (Firestore "schedule" 컬렉션이 비어있을 때 1회 생성)
     const SCHEDULE_SEED = [
-      { id:"task_001", name:"철거 + 먹매김",                         startDate:"2026-06-02", endDate:"2026-06-02", status:"done" },
-      { id:"task_002", name:"판넬벽 재시공 + 텍스 철거",              startDate:"2026-06-03", endDate:"2026-06-04", status:"done" },
-      { id:"task_003", name:"설비 배관 + 샷시 철거",                  startDate:"2026-06-04", endDate:"2026-06-04", status:"done" },
-      { id:"task_004", name:"경량벽체 (LGS)",                        startDate:"2026-06-04", endDate:"2026-06-05", status:"done" },
-      { id:"task_005", name:"터파기 + 배관 연결",                     startDate:"2026-06-05", endDate:"2026-06-06", status:"done" },
-      { id:"task_006", name:"되메우기 + 하스리 + 분배기",             startDate:"2026-06-06", endDate:"2026-06-06", status:"done" },
-      { id:"task_007", name:"수도설비 마무리",                        startDate:"2026-06-08", endDate:"2026-06-08", status:"done" },
-      { id:"task_008", name:"조적 + 인방",                           startDate:"2026-06-09", endDate:"2026-06-10", status:"done" },
-      { id:"task_009", name:"PF보드 단열 + 벽체 컷팅",                startDate:"2026-06-09", endDate:"2026-06-12", status:"done" },
-      { id:"task_010", name:"내부 칸막이 + 단열 마무리",              startDate:"2026-06-13", endDate:"2026-06-14", status:"confirmed", note:"확정" },
-      { id:"task_011", name:"전기 배선 1차",                         startDate:"2026-06-15", endDate:"2026-06-16", status:"planned",   note:"예정" },
-      { id:"task_012", name:"욕실 방수 바탕 정리",                    startDate:"2026-06-15", endDate:"2026-06-16", status:"planned",   note:"예정" },
-      { id:"task_013", name:"샷시 시공 (거실 3400×2100)",             startDate:"2026-06-17", endDate:"2026-06-17", status:"confirmed", note:"확정" },
-      { id:"task_014", name:"미장 (샷시 사춤 포함)",                  startDate:"2026-06-18", endDate:"2026-06-19", status:"confirmed", note:"확정" },
-      { id:"task_015", name:"미장 양생 + 방수 1차",                   startDate:"2026-06-20", endDate:"2026-06-21", status:"planned",   note:"예정" },
-      { id:"task_016", name:"방수 2차 + 담수 테스트 (24h 이상)",       startDate:"2026-06-22", endDate:"2026-06-23", status:"planned",   note:"예정" },
-      { id:"task_017", name:"타일 + 줄눈 (욕실·현관)",                startDate:"2026-06-24", endDate:"2026-06-26", status:"planned",   note:"예정" },
-      { id:"task_018", name:"목공 (천장·문틀·몰딩)",                  startDate:"2026-06-29", endDate:"2026-07-03", status:"planned",   note:"예정" },
-      { id:"task_019", name:"도장/도배 + 필름",                       startDate:"2026-07-06", endDate:"2026-07-08", status:"planned",   note:"예정" },
-      { id:"task_020", name:"바닥재 (마루/장판)",                     startDate:"2026-07-09", endDate:"2026-07-10", status:"planned",   note:"예정" },
-      { id:"task_021", name:"가구 + 욕실 도기·수전",                  startDate:"2026-07-13", endDate:"2026-07-14", status:"planned",   note:"예정" },
-      { id:"task_022", name:"조명·스위치 + 도어",                     startDate:"2026-07-15", endDate:"2026-07-15", status:"planned",   note:"예정" },
-      { id:"task_023", name:"실리콘·코킹 + 보양 철거",                startDate:"2026-07-16", endDate:"2026-07-16", status:"planned",   note:"예정" },
-      { id:"task_024", name:"입주 청소 + 준공 점검",                  startDate:"2026-07-17", endDate:"2026-07-17", status:"planned",   note:"예정" },
+      { id:"task_001", name:"철거·해체",           startDate:"2026-06-02", endDate:"2026-06-02", status:"done" },
+      { id:"task_002", name:"철거·해체",           startDate:"2026-06-03", endDate:"2026-06-04", status:"done" },
+      { id:"task_003", name:"설비·배관공사",        startDate:"2026-06-04", endDate:"2026-06-04", status:"done" },
+      { id:"task_004", name:"칸막이·경량벽체",      startDate:"2026-06-04", endDate:"2026-06-05", status:"done" },
+      { id:"task_005", name:"토공사·터파기",        startDate:"2026-06-05", endDate:"2026-06-06", status:"done" },
+      { id:"task_006", name:"설비·배관공사",        startDate:"2026-06-06", endDate:"2026-06-06", status:"done" },
+      { id:"task_007", name:"설비·배관공사",        startDate:"2026-06-08", endDate:"2026-06-08", status:"done" },
+      { id:"task_008", name:"조적공사",             startDate:"2026-06-09", endDate:"2026-06-10", status:"done" },
+      { id:"task_009", name:"단열공사",             startDate:"2026-06-09", endDate:"2026-06-12", status:"done" },
+      { id:"task_010", name:"칸막이·경량벽체",      startDate:"2026-06-13", endDate:"2026-06-14", status:"confirmed", note:"확정" },
+      { id:"task_011", name:"전기공사",             startDate:"2026-06-15", endDate:"2026-06-16", status:"planned",   note:"예정" },
+      { id:"task_012", name:"방수공사",             startDate:"2026-06-15", endDate:"2026-06-16", status:"planned",   note:"예정" },
+      { id:"task_013", name:"창호공사",             startDate:"2026-06-17", endDate:"2026-06-17", status:"confirmed", note:"확정" },
+      { id:"task_014", name:"미장공사",             startDate:"2026-06-18", endDate:"2026-06-19", status:"confirmed", note:"확정" },
+      { id:"task_015", name:"방수공사",             startDate:"2026-06-20", endDate:"2026-06-21", status:"planned",   note:"예정" },
+      { id:"task_016", name:"방수공사",             startDate:"2026-06-22", endDate:"2026-06-23", status:"planned",   note:"예정" },
+      { id:"task_017", name:"타일공사",             startDate:"2026-06-24", endDate:"2026-06-26", status:"planned",   note:"예정" },
+      { id:"task_018", name:"목공사",               startDate:"2026-06-29", endDate:"2026-07-03", status:"planned",   note:"예정" },
+      { id:"task_019", name:"도장공사",             startDate:"2026-07-06", endDate:"2026-07-08", status:"planned",   note:"예정" },
+      { id:"task_020", name:"바닥공사",             startDate:"2026-07-09", endDate:"2026-07-10", status:"planned",   note:"예정" },
+      { id:"task_021", name:"가구공사",             startDate:"2026-07-13", endDate:"2026-07-14", status:"planned",   note:"예정" },
+      { id:"task_022", name:"조명공사",             startDate:"2026-07-15", endDate:"2026-07-15", status:"planned",   note:"예정" },
+      { id:"task_023", name:"기타",                 startDate:"2026-07-16", endDate:"2026-07-16", status:"planned",   note:"예정" },
+      { id:"task_024", name:"입주청소",             startDate:"2026-07-17", endDate:"2026-07-17", status:"planned",   note:"예정" },
     ].map(t => ({ ...t, color: STATUS_COLOR[t.status] }));
 
     function ItemRow({ item, cat, onToggle, onDelete, onEdit }) {
@@ -761,7 +769,7 @@
       };
 
       const addTask = async () => {
-        const name = addForm.name.trim();
+        const name = (addForm.name === "__custom__" ? "" : addForm.name).trim();
         if (!name) return;
         const id = newId("task");
         const data = {
@@ -778,9 +786,11 @@
         setEditingId(task.id);
         setEditForm({ name: task.name, startDate: task.startDate, endDate: task.endDate, status: task.status });
       };
+      const cancelEdit = () => { setEditingId(null); setEditForm(null); };
       const saveEdit = async () => {
+        const editedName = (editForm.name === "__custom__" ? "" : editForm.name).trim();
         const patch = {
-          name: editForm.name.trim() || tasks.find(t=>t.id===editingId).name,
+          name: editedName || tasks.find(t=>t.id===editingId).name,
           startDate: editForm.startDate, endDate: editForm.endDate || editForm.startDate,
           status: editForm.status, color: STATUS_COLOR[editForm.status],
         };
@@ -793,6 +803,9 @@
         setTasks(ts => ts.filter(t => t.id !== id));
         await deleteDocFn("schedule", id);
       };
+
+      const addIsCustom = addForm.name === "__custom__" || (!PROCESS_LIST.includes(addForm.name) && addForm.name !== "");
+      const addSelectVal = PROCESS_LIST.includes(addForm.name) ? addForm.name : (addIsCustom ? "__custom__" : "");
 
       if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
 
@@ -871,7 +884,27 @@
           {adding && (
             <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
               <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>새 공정 추가</div>
-              <input value={addForm.name} onChange={e=>setAddForm(f=>({...f,name:e.target.value}))} placeholder="공정명" style={{...dl.input, marginBottom:6}} />
+              <select
+                value={addSelectVal}
+                onChange={e => {
+                  if (e.target.value === "__custom__") setAddForm(f=>({...f, name:"__custom__"}));
+                  else setAddForm(f=>({...f, name: e.target.value}));
+                }}
+                style={{...dl.input, marginBottom:6}}
+              >
+                <option value="">공정 선택...</option>
+                {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                <option value="__custom__">✏️ 직접 입력...</option>
+              </select>
+              {addIsCustom && (
+                <input
+                  value={addForm.name === "__custom__" ? "" : addForm.name}
+                  onChange={e=>setAddForm(f=>({...f, name: e.target.value || "__custom__"}))}
+                  placeholder="공정명 직접 입력"
+                  style={{...dl.input, marginBottom:6}}
+                  autoFocus
+                />
+              )}
               <div style={dl.row}>
                 <input type="date" value={addForm.startDate} onChange={e=>setAddForm(f=>({...f,startDate:e.target.value}))} style={{...dl.input, flex:1}} />
                 <span style={{ color:"#a0aec0" }}>~</span>
@@ -881,27 +914,6 @@
                 {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
               </select>
               <button onClick={addTask} style={{ ...dl.primaryBtn, padding:"10px 0", fontSize:13 }}>추가</button>
-            </div>
-          )}
-
-          {editingId && editForm && (
-            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={()=>{ setEditingId(null); setEditForm(null); }}>
-              <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"14px 16px", width:"100%", maxWidth:360, maxHeight:"85vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
-                <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>공정 수정</div>
-                <input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} placeholder="공정명" style={{...dl.input, marginBottom:6}} />
-                <div style={dl.row}>
-                  <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value}))} style={{...dl.input, flex:1}} />
-                  <span style={{ color:"#a0aec0" }}>~</span>
-                  <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate:e.target.value}))} style={{...dl.input, flex:1}} />
-                </div>
-                <select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} style={{...dl.input, marginBottom:8}}>
-                  {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
-                </select>
-                <div style={{ display:"flex", gap:8 }}>
-                  <button onClick={()=>{ setEditingId(null); setEditForm(null); }} style={dl.secondaryBtn}>취소</button>
-                  <button onClick={saveEdit} style={{ ...dl.primaryBtn, padding:"10px 0", fontSize:13 }}>저장</button>
-                </div>
-              </div>
             </div>
           )}
 
@@ -939,24 +951,61 @@
                   const s = startIdx < 0 ? 0 : startIdx;
                   const e = endIdx < 0 ? s : endIdx;
                   const delayed = isDelayed(task, today);
+                  const isEditing = editingId === task.id && editForm;
+                  const editIsCustom = isEditing && (editForm.name === "__custom__" || (!PROCESS_LIST.includes(editForm.name) && editForm.name !== ""));
+                  const editSelectVal = isEditing ? (PROCESS_LIST.includes(editForm.name) ? editForm.name : "__custom__") : "";
                   return (
-                    <div key={task.id} style={{ display:"flex", alignItems:"center", height:40, borderBottom:"1px solid #f0f0f3" }}>
-                      <div style={{
-                        width:GANTT_NAME_W, flexShrink:0, position:"sticky", left:0, background:"#fff", zIndex:2,
-                        borderRight:"1px solid #e2e8f0", padding:"0 4px 0 8px", fontSize:11.5, fontWeight:500,
-                        color: task.status==="done" ? "#a0aec0" : "#2d3748",
-                        display:"flex", alignItems:"center", gap:2,
-                      }}>
-                        {delayed && <span title="지연" style={{ fontSize:11, flexShrink:0 }}>⚠️</span>}
-                        <span style={{
-                          flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                          textDecoration: task.status==="done" ? "line-through" : "none",
-                          color: delayed ? DELAY_COLOR : "inherit",
-                        }} title={task.name}>{task.name}</span>
-                        <button onClick={()=>{ startEdit(task); setAdding(false); }} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:11, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>✏️</button>
-                        <button onClick={()=>removeTask(task.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>×</button>
-                      </div>
-                      <div style={{ position:"relative", height:"100%", flex:`0 0 ${dateRange.length * GANTT_COL_W}px` }}>
+                    <div key={task.id} style={{ display:"flex", alignItems:"stretch", minHeight: isEditing ? 88 : 40, borderBottom:"1px solid #f0f0f3" }}>
+                      {isEditing ? (
+                          <div style={{
+                            width:GANTT_NAME_W, flexShrink:0, position:"sticky", left:0, zIndex:3,
+                            background:"#fffbf5", borderRight:"1px solid #FF6B35",
+                            padding:"4px 4px", display:"flex", flexDirection:"column", gap:2,
+                          }}>
+                            <select
+                              value={editSelectVal}
+                              onChange={e => {
+                                if (e.target.value === "__custom__") setEditForm(f=>({...f, name:"__custom__"}));
+                                else setEditForm(f=>({...f, name: e.target.value}));
+                              }}
+                              style={{ width:"100%", fontSize:10, padding:"3px 3px", border:"1.5px solid #FF6B35", borderRadius:4, outline:"none" }}
+                            >
+                              {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                              <option value="__custom__">✏️ 직접입력</option>
+                            </select>
+                            {editIsCustom && (
+                              <input value={editForm.name === "__custom__" ? "" : editForm.name} onChange={e=>setEditForm(f=>({...f, name: e.target.value||"__custom__"}))} placeholder="공정명" style={{ width:"100%", fontSize:10, padding:"2px 3px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} autoFocus />
+                            )}
+                            <div style={{ display:"flex", gap:2 }}>
+                              <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value}))} style={{ flex:1, fontSize:9, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} />
+                              <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate:e.target.value}))} style={{ flex:1, fontSize:9, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} />
+                            </div>
+                            <div style={{ display:"flex", gap:2 }}>
+                              <select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} style={{ flex:1, fontSize:10, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }}>
+                                {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
+                              </select>
+                              <button onClick={saveEdit} style={{ background:"#FF6B35", color:"#fff", border:"none", borderRadius:3, padding:"2px 7px", fontSize:12, cursor:"pointer", fontWeight:700 }}>✓</button>
+                              <button onClick={cancelEdit} style={{ background:"none", border:"1px solid #e2e8f0", borderRadius:3, padding:"2px 5px", fontSize:12, cursor:"pointer", color:"#718096" }}>✕</button>
+                            </div>
+                          </div>
+                      ) : (
+                        <div style={{
+                          width:GANTT_NAME_W, flexShrink:0, position:"sticky", left:0, background:"#fff", zIndex:2,
+                          borderRight:"1px solid #e2e8f0", padding:"0 4px 0 8px", fontSize:11.5, fontWeight:500,
+                          color: task.status==="done" ? "#a0aec0" : "#2d3748",
+                          display:"flex", alignItems:"center", gap:2,
+                        }}>
+                          {delayed && <span title="지연" style={{ fontSize:11, flexShrink:0 }}>⚠️</span>}
+                          <span style={{
+                            flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                            textDecoration: task.status==="done" ? "line-through" : "none",
+                            color: delayed ? DELAY_COLOR : "inherit",
+                          }} title={task.name}>{task.name}</span>
+                          <button onClick={()=>{ startEdit(task); setAdding(false); }} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:11, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>✏️</button>
+                          <button onClick={()=>removeTask(task.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>×</button>
+                        </div>
+                      )}
+                      <div style={{ position:"relative", flex:`0 0 ${dateRange.length * GANTT_COL_W}px` }}>
                         {dateRange.map((d,i) => d===today && (
                           <div key={d} style={{ position:"absolute", left:i*GANTT_COL_W, top:0, bottom:0, width:GANTT_COL_W, background:"#FFF3CD", zIndex:0 }} />
                         ))}
@@ -998,6 +1047,11 @@
               toggleDone={toggleDone}
               startEdit={(t)=>{ startEdit(t); setAdding(false); }}
               removeTask={removeTask}
+              editingId={editingId}
+              editForm={editForm}
+              setEditForm={setEditForm}
+              saveEdit={saveEdit}
+              cancelEdit={cancelEdit}
             />
           )}
         </div>
@@ -1005,7 +1059,7 @@
     }
 
     /* ---- 공정표 달력 뷰 ---- */
-    function CalendarView({ tasks, calMonth, setCalMonth, selectedDay, setSelectedDay, today, toggleDone, startEdit, removeTask }) {
+    function CalendarView({ tasks, calMonth, setCalMonth, selectedDay, setSelectedDay, today, toggleDone, startEdit, removeTask, editingId, editForm, setEditForm, saveEdit, cancelEdit }) {
       const [y, m] = calMonth.split("-").map(Number);
 
       const tasksByDate = useMemo(() => {
@@ -1045,9 +1099,9 @@
               <div style={{ fontSize:14, fontWeight:700, color:"#1a1a2e" }}>{y}년 {m}월</div>
               <button onClick={()=>shiftMonth(1)} style={{ background:"none", border:"none", fontSize:18, color:"#718096", cursor:"pointer", padding:"4px 10px" }}>›</button>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
               {["일","월","화","수","목","금","토"].map((d,i) => (
-                <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color: i===0?"#e53e3e":i===6?"#2b6cb0":"#a0aec0", padding:"2px 0" }}>{d}</div>
+                <div key={d} style={{ textAlign:"center", fontSize:10, fontWeight:700, color: i===0?"#e53e3e":i===6?"#2b6cb0":"#a0aec0", paddingBottom:4 }}>{d}</div>
               ))}
               {cells.map((d, i) => {
                 if (!d) return <div key={i} />;
@@ -1055,23 +1109,28 @@
                 const dayTasks = tasksByDate[d] || [];
                 const isToday = d === today;
                 const isSel = d === selectedDay;
+                const hasDelay = dayTasks.some(t => isDelayed(t, today));
                 return (
                   <div key={d} onClick={()=>setSelectedDay(isSel ? null : d)} style={{
-                    minHeight:62, borderRadius:8, padding:"3px 3px", cursor:"pointer",
-                    border: isToday ? "2px solid #FFC107" : "1px solid #f0f0f3",
+                    height:46, borderRadius:8, padding:"5px 2px 4px", cursor:"pointer",
+                    border: isToday ? "2px solid #FFC107" : isSel ? "2px solid #FF6B35" : "1px solid #f0f0f3",
                     background: isSel ? "#FFF3E0" : (isToday ? "#FFF8E8" : "#fff"),
+                    display:"flex", flexDirection:"column", alignItems:"center", gap:3,
                   }}>
-                    <div style={{ fontSize:11, fontWeight: isToday?900:500, color: dow===0?"#e53e3e":dow===6?"#2b6cb0":"#4a5568" }}>{Number(d.slice(8))}</div>
-                    {dayTasks.slice(0,3).map(t => (
-                      <div key={t.id} style={{
-                        fontSize:9, marginTop:2, padding:"1px 4px", borderRadius:4,
-                        background: t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned, color:"#fff",
-                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                        textDecoration: t.status==="done" ? "line-through" : "none", opacity: t.status==="done"?0.6:1,
-                        border: isDelayed(t, today) ? `1px solid ${DELAY_COLOR}` : "none",
-                      }} title={t.name}>{isDelayed(t, today) ? "⚠️ " : ""}{t.name}</div>
-                    ))}
-                    {dayTasks.length > 3 && <div style={{ fontSize:9, color:"#a0aec0", marginTop:1 }}>+{dayTasks.length-3}개</div>}
+                    <div style={{ fontSize:12, fontWeight: isToday?900:500, lineHeight:1, color: dow===0?"#e53e3e":dow===6?"#2b6cb0":"#4a5568" }}>{Number(d.slice(8))}</div>
+                    {dayTasks.length > 0 && (
+                      <div style={{ display:"flex", gap:2, flexWrap:"wrap", justifyContent:"center" }}>
+                        {dayTasks.slice(0,4).map((t,ti) => (
+                          <div key={ti} style={{
+                            width:6, height:6, borderRadius:"50%",
+                            background: hasDelay && isDelayed(t,today) ? DELAY_COLOR : (t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned),
+                            opacity: t.status==="done" ? 0.45 : 1,
+                            flexShrink:0,
+                          }} title={t.name} />
+                        ))}
+                        {dayTasks.length > 4 && <div style={{ fontSize:8, color:"#a0aec0", lineHeight:1 }}>+{dayTasks.length-4}</div>}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1083,24 +1142,63 @@
               <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:8 }}>{dayLabel(selectedDay)}</div>
               {selTasks.length === 0 ? (
                 <div style={{ fontSize:12, color:"#a0aec0" }}>등록된 공정이 없습니다</div>
-              ) : selTasks.map(t => (
-                <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #f0f0f3" }}>
-                  <span style={{
-                    fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0,
-                    background: t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned,
-                  }}>{STATUS_LABEL[t.status]}</span>
-                  {isDelayed(t, today) && (
-                    <span style={{ fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0, background:DELAY_COLOR }}>⚠️ 지연</span>
-                  )}
-                  <span style={{
-                    flex:1, fontSize:13, color: t.status==="done" ? "#a0aec0" : "#2d3748",
-                    textDecoration: t.status==="done" ? "line-through" : "none",
-                  }}>{t.name}</span>
-                  <button onClick={()=>toggleDone(t)} title="완료 토글" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:14, cursor:"pointer" }}>✓</button>
-                  <button onClick={()=>startEdit(t)} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer" }}>✏️</button>
-                  <button onClick={()=>removeTask(t.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:15, cursor:"pointer" }}>×</button>
-                </div>
-              ))}
+              ) : selTasks.map(t => {
+                const calEditIsCustom = editingId === t.id && editForm && !PROCESS_LIST.includes(editForm.name);
+                const calEditSelectVal = editingId === t.id && editForm && PROCESS_LIST.includes(editForm.name) ? editForm.name : "__custom__";
+                return editingId === t.id && editForm ? (
+                  <div key={t.id} style={{ padding:"10px 0", borderBottom:"1px solid #f0f0f3" }}>
+                    <select
+                      value={calEditSelectVal}
+                      onChange={e => {
+                        if (e.target.value === "__custom__") setEditForm(f=>({...f, name:"__custom__"}));
+                        else setEditForm(f=>({...f, name: e.target.value}));
+                      }}
+                      style={{...dl.input, marginBottom:6, fontSize:13}}
+                    >
+                      {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                      <option value="__custom__">✏️ 직접 입력...</option>
+                    </select>
+                    {calEditIsCustom && (
+                      <input
+                        value={editForm.name === "__custom__" ? "" : editForm.name}
+                        onChange={e=>setEditForm(f=>({...f, name: e.target.value||"__custom__"}))}
+                        placeholder="공정명 직접 입력"
+                        style={{...dl.input, marginBottom:6, fontSize:13}}
+                        autoFocus
+                      />
+                    )}
+                    <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
+                      <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value}))} style={{...dl.input, flex:1, fontSize:12}} />
+                      <span style={{ color:"#a0aec0", flexShrink:0 }}>~</span>
+                      <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate:e.target.value}))} style={{...dl.input, flex:1, fontSize:12}} />
+                    </div>
+                    <select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} style={{...dl.input, marginBottom:8, fontSize:13}}>
+                      {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
+                    </select>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button onClick={cancelEdit} style={{ flex:1, padding:"9px 0", border:"1.5px solid #e2e8f0", borderRadius:8, background:"none", color:"#718096", fontSize:13, cursor:"pointer" }}>취소</button>
+                      <button onClick={saveEdit} style={{ flex:2, padding:"9px 0", border:"none", borderRadius:8, background:"#FF6B35", color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer" }}>저장</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid #f0f0f3" }}>
+                    <span style={{
+                      fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0,
+                      background: t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned,
+                    }}>{STATUS_LABEL[t.status]}</span>
+                    {isDelayed(t, today) && (
+                      <span style={{ fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0, background:DELAY_COLOR }}>⚠️  지연</span>
+                    )}
+                    <span style={{
+                      flex:1, fontSize:13, color: t.status==="done" ? "#a0aec0" : "#2d3748",
+                      textDecoration: t.status==="done" ? "line-through" : "none",
+                    }}>{t.name}</span>
+                    <button onClick={()=>toggleDone(t)} title="완료 토글" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:14, cursor:"pointer" }}>✓</button>
+                    <button onClick={()=>startEdit(t)} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer" }}>✏️</button>
+                    <button onClick={()=>removeTask(t.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:15, cursor:"pointer" }}>×</button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1129,7 +1227,7 @@
       area: "",
       content: "",
       workers: [{ role: "", count: 1, laborCost: 0 }],
-      materials: [{ name: "", unit: "", qty: 0, unitPrice: 0 }],
+      materials: [{ name: "", unit: "", qty: 0, unitPrice: 0, totalPrice: 0 }],
       equipment: [{ name: "", cost: 0 }],
       otherCosts: [{ name: "", amount: 0 }],
       note: "",
@@ -1152,9 +1250,12 @@
       return normalizeOtherCosts(oc).reduce((s,o) => s + (Number(o.amount)||0), 0);
     }
 
+    function calcMaterialCost(m) {
+      return (Number(m.totalPrice)||0) > 0 ? Number(m.totalPrice) : (Number(m.qty)||0) * (Number(m.unitPrice)||0);
+    }
     function calcTotal(f) {
       const workers = (f.workers||[]).reduce((s,w) => s + (Number(w.laborCost)||0), 0);
-      const materials = (f.materials||[]).reduce((s,m) => s + (Number(m.qty)||0) * (Number(m.unitPrice)||0), 0);
+      const materials = (f.materials||[]).reduce((s,m) => s + calcMaterialCost(m), 0);
       const equipment = (f.equipment||[]).reduce((s,e) => s + (Number(e.cost)||0), 0);
       const other = otherCostsTotal(f.otherCosts);
       return workers + materials + equipment + other;
@@ -1280,7 +1381,7 @@
           area: form.area,
           content: form.content,
           workers: form.workers.filter(w => w.role.trim() || (Number(w.laborCost)||0) > 0),
-          materials: form.materials.filter(m => m.name.trim() || ((Number(m.qty)||0) * (Number(m.unitPrice)||0)) > 0),
+          materials: form.materials.filter(m => m.name.trim() || (Number(m.totalPrice)||0) > 0 || ((Number(m.qty)||0) * (Number(m.unitPrice)||0)) > 0),
           equipment: form.equipment.filter(e => e.name.trim() || (Number(e.cost)||0) > 0),
           otherCosts: form.otherCosts.filter(o => o.name.trim() || (Number(o.amount)||0) > 0),
           note: form.note,
@@ -1357,16 +1458,26 @@
 
             <div style={dl.card}>
               <div style={dl.sectionTitle}>📦 자재</div>
-              {form.materials.map((m,i) => (
-                <div key={i} style={dl.row}>
-                  <input value={m.name} onChange={e=>updateArr("materials",i,"name",e.target.value)} placeholder="자재명" style={{...dl.input, flex:2}} />
-                  <input value={m.unit} onChange={e=>updateArr("materials",i,"unit",e.target.value)} placeholder="단위" style={{...dl.input, flex:1}} />
-                  <input type="number" value={m.qty} onChange={e=>updateArr("materials",i,"qty",e.target.value)} onFocus={e=>e.target.select()} placeholder="수량" style={{...dl.input, flex:1}} />
-                  <input type="number" value={m.unitPrice} onChange={e=>updateArr("materials",i,"unitPrice",e.target.value)} onFocus={e=>e.target.select()} placeholder="단가" style={{...dl.input, flex:1}} />
-                  <button onClick={()=>removeRow("materials",i)} style={dl.removeBtn}>×</button>
+              {form.materials.map((m,i) => {
+                const useTotalPrice = (Number(m.totalPrice)||0) > 0;
+                return (
+                <div key={i} style={{ marginBottom:10, background:"#f9fafb", borderRadius:8, padding:"8px 10px" }}>
+                  <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
+                    <input value={m.name} onChange={e=>updateArr("materials",i,"name",e.target.value)} placeholder="자재명" style={{...dl.input, flex:1}} />
+                    <button onClick={()=>removeRow("materials",i)} style={dl.removeBtn}>×</button>
+                  </div>
+                  <div style={{ display:"flex", gap:4, alignItems:"center", flexWrap:"wrap" }}>
+                    <input type="number" value={m.totalPrice||""} onChange={e=>updateArr("materials",i,"totalPrice",e.target.value)} onFocus={e=>e.target.select()} placeholder="총금액 직접 입력" style={{...dl.input, flex:"1 1 120px", background: useTotalPrice?"#fff3eb":"#fff", border: useTotalPrice?"1.5px solid #FF6B35":"1.5px solid #e2e8f0"}} />
+                    <span style={{ fontSize:11, color:"#c0c0c0", flexShrink:0 }}>또는</span>
+                    <input type="number" value={m.qty||""} onChange={e=>updateArr("materials",i,"qty",e.target.value)} onFocus={e=>e.target.select()} placeholder="수량" style={{...dl.input, flex:"0 0 64px", opacity: useTotalPrice?0.35:1}} />
+                    <input value={m.unit} onChange={e=>updateArr("materials",i,"unit",e.target.value)} placeholder="단위" style={{...dl.input, flex:"0 0 52px", opacity: useTotalPrice?0.35:1}} />
+                    <input type="number" value={m.unitPrice||""} onChange={e=>updateArr("materials",i,"unitPrice",e.target.value)} onFocus={e=>e.target.select()} placeholder="단가" style={{...dl.input, flex:"1 1 80px", opacity: useTotalPrice?0.35:1}} />
+                  </div>
+                  {(calcMaterialCost(m) > 0) && <div style={{ fontSize:11, color:"#FF6B35", marginTop:4, textAlign:"right" }}>= {fmtMoney(calcMaterialCost(m))}</div>}
                 </div>
-              ))}
-              <button style={dl.smallBtn} onClick={()=>addRow("materials",{name:"",unit:"",qty:0,unitPrice:0})}>+ 자재 추가</button>
+                );
+              })}
+              <button style={dl.smallBtn} onClick={()=>addRow("materials",{name:"",unit:"",qty:0,unitPrice:0,totalPrice:0})}>+ 자재 추가</button>
             </div>
 
             <div style={dl.card}>
@@ -1537,10 +1648,10 @@
           {hasMaterials && (
             <div>
               <div style={{ fontSize:11, fontWeight:700, color:COST_COLORS.material, marginBottom:4 }}>📦 자재비</div>
-              {log.materials.filter(m=>m.name || ((Number(m.qty)||0)*(Number(m.unitPrice)||0))>0).map((m,i) => (
+              {log.materials.filter(m=>m.name || calcMaterialCost(m)>0).map((m,i) => (
                 <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#4a5568", padding:"2px 0" }}>
-                  <span>{m.name || "자재"} {m.qty}{m.unit} × {fmtMoney(m.unitPrice)}</span>
-                  <span>{fmtMoney((Number(m.qty)||0)*(Number(m.unitPrice)||0))}</span>
+                  <span>{m.name || "자재"}{(Number(m.totalPrice)||0)>0 ? "" : (m.qty ? ` ${m.qty}${m.unit||""}` : "") + (m.unitPrice ? ` × ${fmtMoney(m.unitPrice)}` : "")}</span>
+                  <span>{fmtMoney(calcMaterialCost(m))}</span>
                 </div>
               ))}
             </div>
@@ -1579,6 +1690,46 @@
       const [budget, setBudget] = useState(0);
       const [budgetInput, setBudgetInput] = useState("");
       const [editingBudget, setEditingBudget] = useState(false);
+      const [quickEntry, setQuickEntry] = useState(false);
+      const [quickForm, setQuickForm] = useState({ date: today, process: "", note: "", items: [{ name: "", amount: "" }] });
+      const [quickSaving, setQuickSaving] = useState(false);
+
+      const openQuickEntry = () => {
+        setQuickForm({ date: today, process: "", note: "", items: [{ name: "", amount: "" }] });
+        setQuickEntry(true);
+      };
+      const quickUpdateItem = (i, field, value) => {
+        setQuickForm(f => { const items = f.items.map((it,ii) => ii===i ? {...it,[field]:value} : it); return {...f, items}; });
+      };
+      const quickAddItem = () => setQuickForm(f => ({...f, items: [...f.items, {name:"", amount:""}]}));
+      const quickRemoveItem = (i) => setQuickForm(f => ({...f, items: f.items.filter((_,ii)=>ii!==i)}));
+      const quickTotal = quickForm.items.reduce((s,it) => s + (Number(it.amount)||0), 0);
+
+      const saveQuickEntry = async () => {
+        const items = quickForm.items.filter(it => it.name.trim() || (Number(it.amount)||0) > 0);
+        if (items.length === 0 && quickTotal === 0) { notify("항목과 금액을 입력해주세요."); return; }
+        setQuickSaving(true);
+        const id = newId("log");
+        const data = {
+          siteId,
+          date: quickForm.date,
+          process: quickForm.process || "기타",
+          area: "",
+          content: quickForm.note || "",
+          workers: [],
+          materials: [],
+          equipment: [],
+          otherCosts: items.map(it => ({ name: it.name || "비용", amount: Number(it.amount)||0 })),
+          note: quickForm.note,
+          totalCost: items.reduce((s,it) => s+(Number(it.amount)||0), 0),
+          photos: [],
+        };
+        await setDoc("dailyLogs", id, data);
+        setLogs(prev => [...prev, { id, ...data }]);
+        setQuickSaving(false);
+        setQuickEntry(false);
+        notify("비용이 저장되었습니다.", "success");
+      };
 
       useEffect(() => {
         (async () => {
@@ -1612,7 +1763,7 @@
         const b = { labor:0, material:0, equipment:0, other:0 };
         logs.forEach(l => {
           b.labor += (l.workers||[]).reduce((s,w) => s + (Number(w.laborCost)||0), 0);
-          b.material += (l.materials||[]).reduce((s,m) => s + (Number(m.qty)||0) * (Number(m.unitPrice)||0), 0);
+          b.material += (l.materials||[]).reduce((s,m) => s + calcMaterialCost(m), 0);
           b.equipment += (l.equipment||[]).reduce((s,e) => s + (Number(e.cost)||0), 0);
           b.other += otherCostsTotal(l.otherCosts);
         });
@@ -1674,6 +1825,54 @@
 
       return (
         <div className="placeholder-wrap">
+          {/* 빠른 비용 입력 버튼 */}
+          {!quickEntry && (
+            <div style={{ marginBottom:10 }}>
+              <button onClick={openQuickEntry} style={{ ...dl.primaryBtn, fontSize:14 }}>💰 빠른 비용 입력</button>
+            </div>
+          )}
+
+          {/* 빠른 비용 입력 폼 */}
+          {quickEntry && (
+            <div style={{ ...dl.card, marginBottom:10 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                <div style={{ fontSize:14, fontWeight:700, color:"#1a1a2e" }}>💰 빠른 비용 입력</div>
+                <button onClick={()=>setQuickEntry(false)} style={{ background:"none", border:"none", color:"#a0aec0", fontSize:18, cursor:"pointer", lineHeight:1 }}>×</button>
+              </div>
+              <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                <div style={{ flex:1 }}>
+                  <label style={dl.label}>날짜</label>
+                  <input type="date" value={quickForm.date} onChange={e=>setQuickForm(f=>({...f,date:e.target.value}))} style={dl.input} />
+                </div>
+                <div style={{ flex:1 }}>
+                  <label style={dl.label}>공정 (선택)</label>
+                  <select value={quickForm.process} onChange={e=>setQuickForm(f=>({...f,process:e.target.value}))} style={dl.input}>
+                    <option value="">선택 안 함 → 기타</option>
+                    {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+              <label style={dl.label}>비용 항목</label>
+              {quickForm.items.map((it,i) => (
+                <div key={i} style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
+                  <input value={it.name} onChange={e=>quickUpdateItem(i,"name",e.target.value)} placeholder="항목명 (예: 인건비, 자재비, 식대)" style={{...dl.input, flex:2}} />
+                  <input type="number" value={it.amount} onChange={e=>quickUpdateItem(i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
+                  {quickForm.items.length > 1 && <button onClick={()=>quickRemoveItem(i)} style={dl.removeBtn}>×</button>}
+                </div>
+              ))}
+              <button style={dl.smallBtn} onClick={quickAddItem}>+ 항목 추가</button>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"10px 0 6px" }}>
+                <span style={{ fontSize:12, color:"#a0aec0" }}>합계</span>
+                <span style={{ fontSize:18, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(quickTotal)}</span>
+              </div>
+              <input value={quickForm.note} onChange={e=>setQuickForm(f=>({...f,note:e.target.value}))} placeholder="메모 (선택사항)" style={{...dl.input, marginBottom:10}} />
+              <div style={{ display:"flex", gap:8 }}>
+                <button style={dl.secondaryBtn} onClick={()=>setQuickEntry(false)}>취소</button>
+                <button style={{...dl.primaryBtn, opacity:quickSaving?0.6:1}} disabled={quickSaving} onClick={saveQuickEntry}>{quickSaving?"저장 중...":"저장"}</button>
+              </div>
+            </div>
+          )}
+
           {/* 누적 / 주간 비용 */}
           <div style={{ display:"flex", gap:10, marginBottom:10 }}>
             <div style={{ flex:1, background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
@@ -2047,7 +2246,7 @@
           const rows = [...logs].sort((a,b) => a.date.localeCompare(b.date)).map(l => ({
             날짜: l.date, 공정: l.process, 위치: l.area||"", 내용: l.content||"",
             인건비: (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0),
-            자재비: (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0),
+            자재비: (l.materials||[]).reduce((s,m)=>s+calcMaterialCost(m),0),
             장비비: (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0),
             기타비용: otherCostsTotal(l.otherCosts),
             합계: Number(l.totalCost)||0,
@@ -2083,7 +2282,7 @@
             const key = l.process || "기타";
             if (!map[key]) map[key] = { 공종:key, 인건비:0, 자재비:0, 장비비:0, 기타비용:0, 합계:0 };
             const labor = (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0);
-            const material = (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0);
+            const material = (l.materials||[]).reduce((s,m)=>s+calcMaterialCost(m),0);
             const equipment = (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0);
             const other = otherCostsTotal(l.otherCosts);
             map[key].인건비 += labor; map[key].자재비 += material; map[key].장비비 += equipment; map[key].기타비용 += other;
@@ -2282,7 +2481,7 @@
           const rows = targets.map(l => ({
             날짜: l.date, 공정: l.process, 위치: l.area||"", 내용: l.content||"",
             인건비: (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0),
-            자재비: (l.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.unitPrice)||0),0),
+            자재비: (l.materials||[]).reduce((s,m)=>s+calcMaterialCost(m),0),
             장비비: (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0),
             기타비용: otherCostsTotal(l.otherCosts),
             합계: Number(l.totalCost)||0,
