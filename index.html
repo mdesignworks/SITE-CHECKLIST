@@ -1515,10 +1515,17 @@
             <div style={dl.card}>
               <div style={dl.sectionTitle}>💵 기타비용</div>
               {form.otherCosts.map((o,i) => (
-                <div key={i} style={dl.row}>
-                  <input value={o.name} onChange={e=>updateArr("otherCosts",i,"name",e.target.value)} placeholder="항목명(예: 식대, 주차비)" style={{...dl.input, flex:2}} />
-                  <input type="number" value={o.amount} onChange={e=>updateArr("otherCosts",i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
-                  <button onClick={()=>removeRow("otherCosts",i)} style={dl.removeBtn}>×</button>
+                <div key={i} style={{ marginBottom:8 }}>
+                  <div style={dl.row}>
+                    <input value={o.name} onChange={e=>updateArr("otherCosts",i,"name",e.target.value)} placeholder="항목명(예: 식대, 주차비)" style={{...dl.input, flex:2}} />
+                    <input type="number" value={o.amount} onChange={e=>updateArr("otherCosts",i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
+                    <button onClick={()=>removeRow("otherCosts",i)} style={dl.removeBtn}>×</button>
+                  </div>
+                  <select value={o.process||""} onChange={e=>updateArr("otherCosts",i,"process",e.target.value)} style={{ width:"100%", fontSize:11, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:6, outline:"none", color: o.process ? "#2d3748" : "#a0aec0", background:"#f7f8fa" }}>
+                    <option value="">공정 지정 안 함 → 일지 공정 따름</option>
+                    <option value="현장공통">🏗️ 현장공통 (식대·교통비·폐기물 등)</option>
+                    {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
                 </div>
               ))}
               <button style={dl.smallBtn} onClick={()=>addRow("otherCosts",{name:"",amount:0})}>+ 항목 추가</button>
@@ -1739,7 +1746,7 @@
           workers: [],
           materials: [],
           equipment: [],
-          otherCosts: items.map(it => ({ name: it.name || "비용", amount: Number(it.amount)||0 })),
+          otherCosts: items.map(it => ({ name: it.name || "비용", amount: Number(it.amount)||0, ...(it.process ? { process: it.process } : {}) })),
           note: quickForm.note,
           totalCost: items.reduce((s,it) => s+(Number(it.amount)||0), 0),
           photos: [],
@@ -1804,8 +1811,22 @@
 
       const byProcess = useMemo(() => {
         const map = {};
-        logs.forEach(l => { const key = l.process || "기타"; map[key] = (map[key]||0) + (Number(l.totalCost)||0); });
-        return Object.entries(map).sort((a,b) => b[1]-a[1]);
+        logs.forEach(l => {
+          const logProc = l.process || "기타";
+          // 인건비 · 자재비 · 장비비 → 일지 공정으로
+          const laborCost = (l.workers||[]).reduce((s,w) => s+(Number(w.laborCost)||0), 0);
+          const matCost = (l.materials||[]).reduce((s,m) => s+calcMaterialCost(m), 0);
+          const eqCost = (l.equipment||[]).reduce((s,e) => s+(Number(e.cost)||0), 0);
+          if (laborCost) map[logProc] = (map[logProc]||0) + laborCost;
+          if (matCost)   map[logProc] = (map[logProc]||0) + matCost;
+          if (eqCost)    map[logProc] = (map[logProc]||0) + eqCost;
+          // 기타비용 → 항목별 공정 사용 (없으면 일지 공정)
+          normalizeOtherCosts(l.otherCosts).forEach(o => {
+            const ocProc = o.process || logProc;
+            map[ocProc] = (map[ocProc]||0) + (Number(o.amount)||0);
+          });
+        });
+        return Object.entries(map).filter(([,v])=>v>0).sort((a,b) => b[1]-a[1]);
       }, [logs]);
       const maxProcessCost = byProcess.length ? byProcess[0][1] : 0;
 
@@ -1937,12 +1958,19 @@
                   </select>
                 </div>
               </div>
-              <label style={dl.label}>비용 항목</label>
+              <label style={dl.label}>비용 항목 <span style={{ fontWeight:400, color:"#a0aec0", fontSize:11 }}>(항목별 공정을 따로 지정할 수 있어요)</span></label>
               {quickForm.items.map((it,i) => (
-                <div key={i} style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
-                  <input value={it.name} onChange={e=>quickUpdateItem(i,"name",e.target.value)} placeholder="항목명 (예: 인건비, 자재비, 식대)" style={{...dl.input, flex:2}} />
-                  <input type="number" value={it.amount} onChange={e=>quickUpdateItem(i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
-                  {quickForm.items.length > 1 && <button onClick={()=>quickRemoveItem(i)} style={dl.removeBtn}>×</button>}
+                <div key={i} style={{ marginBottom:8 }}>
+                  <div style={{ display:"flex", gap:6, marginBottom:3, alignItems:"center" }}>
+                    <input value={it.name} onChange={e=>quickUpdateItem(i,"name",e.target.value)} placeholder="항목명 (예: 식대, 폐기물처리비)" style={{...dl.input, flex:2}} />
+                    <input type="number" value={it.amount} onChange={e=>quickUpdateItem(i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
+                    {quickForm.items.length > 1 && <button onClick={()=>quickRemoveItem(i)} style={dl.removeBtn}>×</button>}
+                  </div>
+                  <select value={it.process||""} onChange={e=>quickUpdateItem(i,"process",e.target.value)} style={{ width:"100%", fontSize:11, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:6, outline:"none", color: it.process ? "#2d3748" : "#a0aec0", background:"#f7f8fa" }}>
+                    <option value="">공정 지정 안 함 → 위 공정 따름</option>
+                    <option value="현장공통">🏗️ 현장공통 (식대·교통비·폐기물 등)</option>
+                    {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
                 </div>
               ))}
               <button style={dl.smallBtn} onClick={quickAddItem}>+ 항목 추가</button>
