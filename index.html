@@ -1820,9 +1820,9 @@
           if (laborCost) map[logProc] = (map[logProc]||0) + laborCost;
           if (matCost)   map[logProc] = (map[logProc]||0) + matCost;
           if (eqCost)    map[logProc] = (map[logProc]||0) + eqCost;
-          // 기타비용 → 항목별 공정 사용 (없으면 일지 공정)
+          // 기타비용 → 항목별 공정 사용 (없으면 현장공통 — 식대·운반비 등은 공정과 무관)
           normalizeOtherCosts(l.otherCosts).forEach(o => {
-            const ocProc = o.process || logProc;
+            const ocProc = o.process || "현장공통";
             map[ocProc] = (map[ocProc]||0) + (Number(o.amount)||0);
           });
         });
