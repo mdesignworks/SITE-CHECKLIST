@@ -2103,7 +2103,7 @@
           </div>
 
           {/* 자재 발주 트래커 */}
-          <MaterialTracker />
+          <MaterialTracker logs={logs} />
 
           {/* 업체·인력 연락처 */}
           <ContactList />
@@ -2131,9 +2131,9 @@
                 </div>
               ) : (<>
 
-              {/* 직종별 집계 */}
+              {/* 팀·직종별 집계 */}
               <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>직종별 투입 현황</div>
+                <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>팀·직종별 투입 현황</div>
                 {laborSummary.byRole.map(([role, val]) => (
                   <div key={role} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid #f7f8fa" }}>
                     <div style={{ flex:1 }}>
@@ -2186,7 +2186,7 @@
                         {open && (
                           <div style={{ padding:"8px 12px 12px", borderTop:"1px solid #f7f8fa" }}>
                             <div style={{ display:"flex", padding:"4px 0 6px", borderBottom:"1px solid #f0f0f3", marginBottom:4 }}>
-                              <span style={{ flex:2, fontSize:11, fontWeight:700, color:"#a0aec0" }}>직종/역할</span>
+                              <span style={{ flex:2, fontSize:11, fontWeight:700, color:"#a0aec0" }}>팀·직종</span>
                               <span style={{ flex:1, fontSize:11, fontWeight:700, color:"#a0aec0", textAlign:"center" }}>인원</span>
                               <span style={{ flex:2, fontSize:11, fontWeight:700, color:"#a0aec0", textAlign:"right" }}>인건비</span>
                             </div>
@@ -2220,12 +2220,30 @@
     const MATERIAL_STATUS = ["필요", "주문완료", "입고완료"];
     const MATERIAL_STATUS_COLOR = { "필요":"#ED8936", "주문완료":"#4472C4", "입고완료":"#48BB78" };
 
-    function MaterialTracker() {
+    function MaterialTracker({ logs = [] }) {
       const { siteId } = React.useContext(SiteContext);
       const [items, setItems] = useState([]);
       const [loaded, setLoaded] = useState(false);
       const [adding, setAdding] = useState(false);
       const [form, setForm] = useState({ name:"", spec:"", qty:"", unit:"", note:"", minQty:"" });
+      const [showLogMats, setShowLogMats] = useState(false);
+
+      // 일지에서 사용된 자재 집계 (이름 기준)
+      const logMaterials = useMemo(() => {
+        const map = {};
+        logs.forEach(l => {
+          (l.materials||[]).filter(m => m.name && m.name.trim()).forEach(m => {
+            const key = m.name.trim();
+            if (!map[key]) map[key] = { name: key, unit: m.unit||"", totalQty: 0, totalCost: 0, uses: [] };
+            const qty = Number(m.qty)||0;
+            const cost = calcMaterialCost(m);
+            map[key].totalQty += qty;
+            map[key].totalCost += cost;
+            map[key].uses.push({ date: l.date, process: l.process||"기타", qty, cost });
+          });
+        });
+        return Object.values(map).sort((a,b) => b.totalCost - a.totalCost);
+      }, [logs]);
 
       useEffect(() => { (async () => { setItems(await fetchCollection("materials", siteId)); setLoaded(true); })(); }, [siteId]);
 
@@ -2302,6 +2320,35 @@
                   <button onClick={()=>removeItem(item.id)} style={dl.removeBtn}>×</button>
                 </div>
               );})}
+            </div>
+          )}
+
+          {/* 일지에서 사용된 자재 */}
+          {logMaterials.length > 0 && (
+            <div style={{ marginTop:14, borderTop:"1px solid #e2e8f0", paddingTop:12 }}>
+              <div onClick={()=>setShowLogMats(v=>!v)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", marginBottom: showLogMats ? 10 : 0 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"#4a5568" }}>📋 일지에서 사용된 자재 ({logMaterials.length}종)</div>
+                <span style={{ fontSize:11, color:"#a0aec0" }}>{showLogMats ? "▲ 접기" : "▼ 펼치기"}</span>
+              </div>
+              {showLogMats && (
+                <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                  {logMaterials.map(mat => {
+                    const alreadyInTracker = items.some(i => i.name.trim() === mat.name);
+                    return (
+                      <div key={mat.name} style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 0", borderBottom:"1px solid #f7f8fa" }}>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:600, color:"#2d3748", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{mat.name}{mat.unit && <span style={{ fontWeight:400, color:"#a0aec0" }}> · {mat.unit}</span>}</div>
+                          <div style={{ fontSize:11, color:"#a0aec0", marginTop:1 }}>총 {mat.totalQty > 0 ? `${mat.totalQty}${mat.unit}` : `${mat.uses.length}회`} 사용 · {fmtMoney(mat.totalCost)}</div>
+                        </div>
+                        {alreadyInTracker
+                          ? <span style={{ fontSize:11, color:"#48BB78", fontWeight:700, flexShrink:0 }}>✓ 트래커 등록됨</span>
+                          : <button onClick={()=>{ setForm(f=>({...f, name:mat.name, unit:mat.unit||"", qty:"", spec:"", note:"", minQty:""})); setAdding(true); }} style={{ background:"none", border:"1px solid #FF6B35", color:"#FF6B35", borderRadius:6, padding:"3px 8px", fontSize:11, fontWeight:700, cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>+ 발주 추가</button>
+                        }
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
