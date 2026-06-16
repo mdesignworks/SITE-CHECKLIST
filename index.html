@@ -1721,6 +1721,47 @@
       const [quickForm, setQuickForm] = useState({ date: today, process: "", note: "", items: [{ name: "", amount: "" }] });
       const [quickSaving, setQuickSaving] = useState(false);
 
+      // 빠른 인력 입력
+      const [quickLabor, setQuickLabor] = useState(false);
+      const [quickLaborForm, setQuickLaborForm] = useState({ date: today, process: "", note: "", workers: [{ role: "", count: 1, laborCost: "" }] });
+      const [quickLaborSaving, setQuickLaborSaving] = useState(false);
+      const openQuickLabor = () => {
+        setQuickLaborForm({ date: today, process: "", note: "", workers: [{ role: "", count: 1, laborCost: "" }] });
+        setQuickLabor(true);
+      };
+      const quickLaborUpdate = (i, field, value) => {
+        setQuickLaborForm(f => { const workers = f.workers.map((w,wi) => wi===i ? {...w,[field]:value} : w); return {...f, workers}; });
+      };
+      const quickLaborAdd = () => setQuickLaborForm(f => ({...f, workers: [...f.workers, {role:"", count:1, laborCost:""}]}));
+      const quickLaborRemove = (i) => setQuickLaborForm(f => ({...f, workers: f.workers.filter((_,wi)=>wi!==i)}));
+      const quickLaborTotal = quickLaborForm.workers.reduce((s,w) => s + (Number(w.laborCost)||0), 0);
+      const quickLaborManDays = quickLaborForm.workers.reduce((s,w) => s + (Number(w.count)||0), 0);
+      const saveQuickLabor = async () => {
+        const workers = quickLaborForm.workers.filter(w => w.role.trim() || (Number(w.count)||0) > 0 || (Number(w.laborCost)||0) > 0);
+        if (workers.length === 0) { notify("팀/직종 정보를 입력해주세요."); return; }
+        setQuickLaborSaving(true);
+        const id = newId("log");
+        const data = {
+          siteId,
+          date: quickLaborForm.date,
+          process: quickLaborForm.process || "기타",
+          area: "",
+          content: quickLaborForm.note || "",
+          workers: workers.map(w => ({ role: w.role||"인력", count: Number(w.count)||1, laborCost: Number(w.laborCost)||0 })),
+          materials: [],
+          equipment: [],
+          otherCosts: [],
+          note: quickLaborForm.note,
+          totalCost: workers.reduce((s,w) => s+(Number(w.laborCost)||0), 0),
+          photos: [],
+        };
+        await setDoc("dailyLogs", id, data);
+        setLogs(prev => [...prev, { id, ...data }]);
+        setQuickLaborSaving(false);
+        setQuickLabor(false);
+        notify("인력이 저장되었습니다.", "success");
+      };
+
       const openQuickEntry = () => {
         setQuickForm({ date: today, process: "", note: "", items: [{ name: "", amount: "" }] });
         setQuickEntry(true);
@@ -2161,6 +2202,56 @@
           {/* ── 인력투입 뷰 ── */}
           {costView === "labor" && (
             <div>
+
+              {/* 빠른 인력 입력 버튼 */}
+              {!quickLabor && (
+                <div style={{ marginBottom:10 }}>
+                  <button onClick={openQuickLabor} style={{ ...dl.primaryBtn, fontSize:14 }}>👷 빠른 인력 입력</button>
+                </div>
+              )}
+
+              {/* 빠른 인력 입력 폼 */}
+              {quickLabor && (
+                <div style={{ ...dl.card, marginBottom:10 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                    <div style={{ fontSize:14, fontWeight:700, color:"#1a1a2e" }}>👷 빠른 인력 입력</div>
+                    <button onClick={()=>setQuickLabor(false)} style={{ background:"none", border:"none", color:"#a0aec0", fontSize:18, cursor:"pointer", lineHeight:1 }}>×</button>
+                  </div>
+                  <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+                    <div style={{ flex:1 }}>
+                      <label style={dl.label}>날짜</label>
+                      <input type="date" value={quickLaborForm.date} onChange={e=>setQuickLaborForm(f=>({...f,date:e.target.value}))} style={dl.input} />
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <label style={dl.label}>공정 (선택)</label>
+                      <select value={quickLaborForm.process} onChange={e=>setQuickLaborForm(f=>({...f,process:e.target.value}))} style={dl.input}>
+                        <option value="">선택 안 함 → 기타</option>
+                        {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <label style={dl.label}>팀·직종 인력</label>
+                  {quickLaborForm.workers.map((w,i) => (
+                    <div key={i} style={{ display:"flex", gap:5, marginBottom:6, alignItems:"center" }}>
+                      <input value={w.role} onChange={e=>quickLaborUpdate(i,"role",e.target.value)} placeholder="팀/직종명 (예: 조적팀)" style={{...dl.input, flex:3}} />
+                      <input type="number" value={w.count} onChange={e=>quickLaborUpdate(i,"count",e.target.value)} onFocus={e=>e.target.select()} placeholder="인원" style={{...dl.input, flex:1, minWidth:48}} min={1} />
+                      <input type="number" value={w.laborCost} onChange={e=>quickLaborUpdate(i,"laborCost",e.target.value)} onFocus={e=>e.target.select()} placeholder="인건비" style={{...dl.input, flex:2}} />
+                      {quickLaborForm.workers.length > 1 && <button onClick={()=>quickLaborRemove(i)} style={dl.removeBtn}>×</button>}
+                    </div>
+                  ))}
+                  <button style={dl.smallBtn} onClick={quickLaborAdd}>+ 팀·직종 추가</button>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"10px 0 6px" }}>
+                    <span style={{ fontSize:12, color:"#a0aec0" }}>{quickLaborManDays}인·일 합계</span>
+                    <span style={{ fontSize:18, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(quickLaborTotal)}</span>
+                  </div>
+                  <input value={quickLaborForm.note} onChange={e=>setQuickLaborForm(f=>({...f,note:e.target.value}))} placeholder="메모 (선택사항)" style={{...dl.input, marginBottom:10}} />
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button style={dl.secondaryBtn} onClick={()=>setQuickLabor(false)}>취소</button>
+                    <button style={{...dl.primaryBtn, opacity:quickLaborSaving?0.6:1}} disabled={quickLaborSaving} onClick={saveQuickLabor}>{quickLaborSaving?"저장 중...":"저장"}</button>
+                  </div>
+                </div>
+              )}
+
               {/* 요약 카드 */}
               <div style={{ display:"flex", gap:10, marginBottom:10 }}>
                 <div style={{ flex:1, background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
