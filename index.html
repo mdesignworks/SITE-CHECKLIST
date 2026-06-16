@@ -715,7 +715,7 @@
       const [loaded, setLoaded] = useState(false);
       const [weather, setWeather] = useState({});
       const [adding, setAdding] = useState(false);
-      const [addForm, setAddForm] = useState({ name:"", startDate: today, endDate: today, status:"planned" });
+      const [addForm, setAddForm] = useState({ name:"", detail:"", startDate: today, endDate: today, status:"planned" });
       const [editingId, setEditingId] = useState(null);
       const [editForm, setEditForm] = useState(null);
       const [view, setView] = useState("calendar"); // "gantt" | "calendar"
@@ -773,24 +773,25 @@
         if (!name) return;
         const id = newId("task");
         const data = {
-          name, startDate: addForm.startDate, endDate: addForm.endDate || addForm.startDate,
+          name, detail: addForm.detail||"", startDate: addForm.startDate, endDate: addForm.endDate || addForm.startDate,
           status: addForm.status, color: STATUS_COLOR[addForm.status], siteId,
         };
         setTasks(ts => [...ts, { id, ...data }]);
-        setAddForm({ name:"", startDate: today, endDate: today, status:"planned" });
+        setAddForm({ name:"", detail:"", startDate: today, endDate: today, status:"planned" });
         setAdding(false);
         await setDoc("schedule", id, data);
       };
 
       const startEdit = (task) => {
         setEditingId(task.id);
-        setEditForm({ name: task.name, startDate: task.startDate, endDate: task.endDate, status: task.status });
+        setEditForm({ name: task.name, detail: task.detail||"", startDate: task.startDate, endDate: task.endDate, status: task.status });
       };
       const cancelEdit = () => { setEditingId(null); setEditForm(null); };
       const saveEdit = async () => {
         const editedName = (editForm.name === "__custom__" ? "" : editForm.name).trim();
         const patch = {
           name: editedName || tasks.find(t=>t.id===editingId).name,
+          detail: editForm.detail||"",
           startDate: editForm.startDate, endDate: editForm.endDate || editForm.startDate,
           status: editForm.status, color: STATUS_COLOR[editForm.status],
         };
@@ -905,6 +906,12 @@
                   autoFocus
                 />
               )}
+              <input
+                value={addForm.detail}
+                onChange={e=>setAddForm(f=>({...f, detail: e.target.value}))}
+                placeholder="세부 공정 내용 (예: 현관문 교체, 욕실 타일 시공)"
+                style={{...dl.input, marginBottom:6, fontSize:13, color:"#555"}}
+              />
               <div style={dl.row}>
                 <input type="date" value={addForm.startDate} onChange={e=>setAddForm(f=>({...f,startDate:e.target.value,endDate:e.target.value>f.endDate?e.target.value:f.endDate}))} style={{...dl.input, flex:1}} />
                 <span style={{ color:"#a0aec0" }}>~</span>
@@ -976,6 +983,7 @@
                             {editIsCustom && (
                               <input value={editForm.name === "__custom__" ? "" : editForm.name} onChange={e=>setEditForm(f=>({...f, name: e.target.value||"__custom__"}))} placeholder="공정명" style={{ width:"100%", fontSize:10, padding:"2px 3px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} autoFocus />
                             )}
+                            <input value={editForm.detail||""} onChange={e=>setEditForm(f=>({...f, detail: e.target.value}))} placeholder="세부 공정 내용" style={{ width:"100%", fontSize:10, padding:"2px 3px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none", color:"#555" }} />
                             <div style={{ display:"flex", gap:2 }}>
                               <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value,endDate:e.target.value>f.endDate?e.target.value:f.endDate}))} style={{ flex:1, fontSize:9, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} />
                               <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate:e.target.value}))} style={{ flex:1, fontSize:9, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} />
@@ -996,11 +1004,14 @@
                           display:"flex", alignItems:"center", gap:2,
                         }}>
                           {delayed && <span title="지연" style={{ fontSize:11, flexShrink:0 }}>⚠️</span>}
-                          <span style={{
-                            flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                            textDecoration: task.status==="done" ? "line-through" : "none",
-                            color: delayed ? DELAY_COLOR : "inherit",
-                          }} title={task.name}>{task.name}</span>
+                          <span style={{ flex:1, minWidth:0, overflow:"hidden", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+                            <span style={{
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                              textDecoration: task.status==="done" ? "line-through" : "none",
+                              color: delayed ? DELAY_COLOR : "inherit",
+                            }} title={task.name}>{task.name}</span>
+                            {task.detail && <span style={{ fontSize:9.5, color:"#a0aec0", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={task.detail}>{task.detail}</span>}
+                          </span>
                           <button onClick={()=>{ startEdit(task); setAdding(false); }} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:11, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>✏️</button>
                           <button onClick={()=>removeTask(task.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer", padding:"0 1px", flexShrink:0 }}>×</button>
                         </div>
@@ -1167,6 +1178,12 @@
                         autoFocus
                       />
                     )}
+                    <input
+                      value={editForm.detail||""}
+                      onChange={e=>setEditForm(f=>({...f, detail: e.target.value}))}
+                      placeholder="세부 공정 내용 (예: 현관문 교체, 욕실 타일 시공)"
+                      style={{...dl.input, marginBottom:6, fontSize:13, color:"#555"}}
+                    />
                     <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
                       <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value,endDate:e.target.value>f.endDate?e.target.value:f.endDate}))} style={{...dl.input, flex:1, fontSize:12}} />
                       <span style={{ color:"#a0aec0", flexShrink:0 }}>~</span>
@@ -1189,10 +1206,13 @@
                     {isDelayed(t, today) && (
                       <span style={{ fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0, background:DELAY_COLOR }}>⚠️  지연</span>
                     )}
-                    <span style={{
-                      flex:1, fontSize:13, color: t.status==="done" ? "#a0aec0" : "#2d3748",
-                      textDecoration: t.status==="done" ? "line-through" : "none",
-                    }}>{t.name}</span>
+                    <span style={{ flex:1, display:"flex", flexDirection:"column" }}>
+                      <span style={{
+                        fontSize:13, color: t.status==="done" ? "#a0aec0" : "#2d3748",
+                        textDecoration: t.status==="done" ? "line-through" : "none",
+                      }}>{t.name}</span>
+                      {t.detail && <span style={{ fontSize:11, color:"#a0aec0" }}>{t.detail}</span>}
+                    </span>
                     <button onClick={()=>toggleDone(t)} title="완료 토글" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:14, cursor:"pointer" }}>✓</button>
                     <button onClick={()=>startEdit(t)} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer" }}>✏️</button>
                     <button onClick={()=>removeTask(t.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:15, cursor:"pointer" }}>×</button>
