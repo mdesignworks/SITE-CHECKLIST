@@ -1841,10 +1841,55 @@
       const [expandedLogs, setExpandedLogs] = useState({});
       const toggleLog = (id) => setExpandedLogs(e => ({ ...e, [id]: !e[id] }));
 
+      // 인력 서브뷰
+      const [costView, setCostView] = useState("cost");
+      const [expandedLaborLog, setExpandedLaborLog] = useState({});
+      const toggleLaborLog = (id) => setExpandedLaborLog(e => ({ ...e, [id]: !e[id] }));
+
+      const laborSummary = useMemo(() => {
+        let totalManDays = 0, totalLaborCost = 0;
+        const byProcess = {};
+        const byRole = {};
+        const byDate = [];
+        const logsWithWorkers = sortedLogs.filter(l => (l.workers||[]).some(w => w.role || (Number(w.count)||0) > 0 || (Number(w.laborCost)||0) > 0));
+        logsWithWorkers.forEach(l => {
+          const ws = (l.workers||[]).filter(w => w.role || (Number(w.count)||0) > 0 || (Number(w.laborCost)||0) > 0);
+          let dayManDays = 0, dayLaborCost = 0;
+          ws.forEach(w => {
+            const cnt = Number(w.count) || 1;
+            const cost = Number(w.laborCost) || 0;
+            totalManDays += cnt; dayManDays += cnt;
+            totalLaborCost += cost; dayLaborCost += cost;
+            const proc = l.process || "기타";
+            if (!byProcess[proc]) byProcess[proc] = { manDays:0, laborCost:0 };
+            byProcess[proc].manDays += cnt; byProcess[proc].laborCost += cost;
+            const role = w.role || "미분류";
+            if (!byRole[role]) byRole[role] = { manDays:0, laborCost:0 };
+            byRole[role].manDays += cnt; byRole[role].laborCost += cost;
+          });
+          byDate.push({ log: l, workers: ws, manDays: dayManDays, laborCost: dayLaborCost });
+        });
+        return {
+          totalManDays, totalLaborCost,
+          byProcess: Object.entries(byProcess).sort((a,b) => b[1].manDays - a[1].manDays),
+          byRole: Object.entries(byRole).sort((a,b) => b[1].manDays - a[1].manDays),
+          byDate,
+        };
+      }, [sortedLogs]);
+
       if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
 
       return (
         <div className="placeholder-wrap">
+          {/* 서브탭 토글 */}
+          <div style={{ display:"flex", background:"#f7f8fa", borderRadius:10, padding:3, marginBottom:12, gap:3 }}>
+            <button onClick={()=>setCostView("cost")} style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", fontSize:13, fontWeight:700, cursor:"pointer", background: costView==="cost" ? "#fff" : "transparent", color: costView==="cost" ? "#FF6B35" : "#a0aec0", boxShadow: costView==="cost" ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition:"all 0.15s" }}>💰 비용</button>
+            <button onClick={()=>setCostView("labor")} style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", fontSize:13, fontWeight:700, cursor:"pointer", background: costView==="labor" ? "#fff" : "transparent", color: costView==="labor" ? "#FF6B35" : "#a0aec0", boxShadow: costView==="labor" ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition:"all 0.15s" }}>👷 인력투입</button>
+          </div>
+
+          {/* ── 비용 뷰 ── */}
+          {costView === "cost" && <>
+
           {/* 빠른 비용 입력 버튼 */}
           {!quickEntry && (
             <div style={{ marginBottom:10 }}>
@@ -2062,6 +2107,112 @@
 
           {/* 업체·인력 연락처 */}
           <ContactList />
+
+          </>} {/* end 비용 뷰 */}
+
+          {/* ── 인력투입 뷰 ── */}
+          {costView === "labor" && (
+            <div>
+              {/* 요약 카드 */}
+              <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+                <div style={{ flex:1, background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
+                  <div style={{ fontSize:12, color:"#a0aec0" }}>총 투입 인원·일</div>
+                  <div style={{ fontSize:22, fontWeight:900, color:"#1a1a2e" }}>{laborSummary.totalManDays}<span style={{ fontSize:13, fontWeight:500, color:"#a0aec0", marginLeft:3 }}>인·일</span></div>
+                </div>
+                <div style={{ flex:1, background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px" }}>
+                  <div style={{ fontSize:12, color:"#a0aec0" }}>총 인건비</div>
+                  <div style={{ fontSize:18, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(laborSummary.totalLaborCost)}</div>
+                </div>
+              </div>
+
+              {laborSummary.byDate.length === 0 ? (
+                <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"32px 14px", textAlign:"center", color:"#a0aec0", fontSize:13 }}>
+                  작업일지에 인력 데이터를 입력하면 여기에 표시됩니다.
+                </div>
+              ) : (<>
+
+              {/* 직종별 집계 */}
+              <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>직종별 투입 현황</div>
+                {laborSummary.byRole.map(([role, val]) => (
+                  <div key={role} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid #f7f8fa" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#2d3748" }}>{role}</div>
+                      <div style={{ fontSize:11, color:"#a0aec0", marginTop:1 }}>{val.manDays}인·일 · {fmtMoney(val.laborCost)}</div>
+                    </div>
+                    <div style={{ width:80, height:6, background:"#f0f0f3", borderRadius:4, overflow:"hidden" }}>
+                      <div style={{ height:"100%", borderRadius:4, background:"#FF6B35", width:`${Math.round(val.manDays/laborSummary.totalManDays*100)}%` }} />
+                    </div>
+                    <div style={{ fontSize:12, fontWeight:700, color:"#FF6B35", minWidth:32, textAlign:"right" }}>{Math.round(val.manDays/laborSummary.totalManDays*100)}%</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 공정별 집계 */}
+              <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>공정별 투입 현황</div>
+                {laborSummary.byProcess.map(([proc, val]) => (
+                  <div key={proc} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid #f7f8fa" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:600, color:"#2d3748" }}>{proc}</div>
+                      <div style={{ fontSize:11, color:"#a0aec0", marginTop:1 }}>{val.manDays}인·일 · {fmtMoney(val.laborCost)}</div>
+                    </div>
+                    <div style={{ width:80, height:6, background:"#f0f0f3", borderRadius:4, overflow:"hidden" }}>
+                      <div style={{ height:"100%", borderRadius:4, background:"#4472C4", width:`${Math.round(val.manDays/laborSummary.totalManDays*100)}%` }} />
+                    </div>
+                    <div style={{ fontSize:12, fontWeight:700, color:"#4472C4", minWidth:32, textAlign:"right" }}>{Math.round(val.manDays/laborSummary.totalManDays*100)}%</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 날짜별 상세 */}
+              <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:10 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:10 }}>날짜별 인력 투입 내역</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                  {laborSummary.byDate.map(({ log, workers, manDays, laborCost }) => {
+                    const open = !!expandedLaborLog[log.id];
+                    return (
+                      <div key={log.id} style={{ border:"1px solid #f0f0f3", borderRadius:8, overflow:"hidden" }}>
+                        <div onClick={()=>toggleLaborLog(log.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", cursor:"pointer", background: open ? "#fffbf5" : "#fff" }}>
+                          <div>
+                            <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>{dayLabel(log.date)}</div>
+                            <div style={{ fontSize:11, color:"#a0aec0", marginTop:2 }}>{log.process || "기타"} · {manDays}인·일</div>
+                          </div>
+                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                            <span style={{ fontSize:13, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(laborCost)}</span>
+                            <span style={{ fontSize:11, color:"#a0aec0" }}>{open ? "▲" : "▼"}</span>
+                          </div>
+                        </div>
+                        {open && (
+                          <div style={{ padding:"8px 12px 12px", borderTop:"1px solid #f7f8fa" }}>
+                            <div style={{ display:"flex", padding:"4px 0 6px", borderBottom:"1px solid #f0f0f3", marginBottom:4 }}>
+                              <span style={{ flex:2, fontSize:11, fontWeight:700, color:"#a0aec0" }}>직종/역할</span>
+                              <span style={{ flex:1, fontSize:11, fontWeight:700, color:"#a0aec0", textAlign:"center" }}>인원</span>
+                              <span style={{ flex:2, fontSize:11, fontWeight:700, color:"#a0aec0", textAlign:"right" }}>인건비</span>
+                            </div>
+                            {workers.map((w,i) => (
+                              <div key={i} style={{ display:"flex", alignItems:"center", padding:"5px 0", borderBottom:"1px solid #f7f8fa" }}>
+                                <span style={{ flex:2, fontSize:13, color:"#2d3748", fontWeight:600 }}>{w.role || "미분류"}</span>
+                                <span style={{ flex:1, fontSize:13, color:"#2d3748", textAlign:"center" }}>{Number(w.count)||1}명</span>
+                                <span style={{ flex:2, fontSize:13, color:"#FF6B35", fontWeight:700, textAlign:"right" }}>{fmtMoney(Number(w.laborCost)||0)}</span>
+                              </div>
+                            ))}
+                            <div style={{ display:"flex", justifyContent:"space-between", marginTop:8, paddingTop:6, borderTop:"1px solid #e2e8f0" }}>
+                              <span style={{ fontSize:12, color:"#a0aec0" }}>소계</span>
+                              <span style={{ fontSize:13, fontWeight:900, color:"#1a1a2e" }}>{manDays}인·일 · {fmtMoney(laborCost)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              </>)}
+            </div>
+          )}
+
         </div>
       );
     }
