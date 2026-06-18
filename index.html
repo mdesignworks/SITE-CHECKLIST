@@ -309,11 +309,17 @@
        탭 3. 체크리스트 (기존 site-checklist 앱 — 그대로 이식)
        ============================================================ */
 
-    const CATS = [
-      { key: "required", label: "필수사항", color: "#e53e3e", bg: "#fff5f5", border: "#feb2b2" },
-      { key: "request",  label: "요청사항", color: "#2b6cb0", bg: "#ebf8ff", border: "#90cdf4" },
-      { key: "change",   label: "변동사항", color: "#276749", bg: "#f0fff4", border: "#9ae6b4" },
-    ];
+    // 구형 데이터(required/request/change 배열) → 신형(items 배열)으로 통합
+    function normalizeDayLog(log) {
+      if (!log) return { items: [] };
+      if (Array.isArray(log.items)) return log;
+      const merged = [
+        ...(log.required || []),
+        ...(log.request  || []),
+        ...(log.change   || []),
+      ].sort((a, b) => (a.id||0) - (b.id||0));
+      return { items: merged };
+    }
 
     const fmtDate = (d) => {
       const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
@@ -464,7 +470,7 @@
       { id:"task_024", name:"입주청소",             startDate:"2026-07-17", endDate:"2026-07-17", status:"planned",   note:"예정" },
     ].map(t => ({ ...t, color: STATUS_COLOR[t.status] }));
 
-    function ItemRow({ item, cat, onToggle, onDelete, onEdit }) {
+    function ItemRow({ item, onToggle, onDelete, onEdit }) {
       const [editing, setEditing] = useState(false);
       const [editVal, setEditVal] = useState(item.text);
       const save = () => {
@@ -472,14 +478,14 @@
         setEditing(false);
       };
       return (
-        <div style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"7px 10px", borderRadius:7, border:`1.5px solid ${item.done?"#e2e8f0":cat.border}`, background:item.done?"#f7fafc":cat.bg, marginBottom:5 }}>
-          <button onClick={() => onToggle(item.id)} style={{ width:18, height:18, borderRadius:4, border:`2px solid ${item.done?"#aaa":cat.color}`, background:item.done?"#aaa":"transparent", cursor:"pointer", flexShrink:0, marginTop:2, display:"flex", alignItems:"center", justifyContent:"center" }}>
-            {item.done && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
+        <div style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"10px 12px", borderRadius:8, border:`1.5px solid ${item.done?"#e2e8f0":"#e2e8f0"}`, background:item.done?"#f7fafc":"#fff", marginBottom:6 }}>
+          <button onClick={() => onToggle(item.id)} style={{ width:20, height:20, borderRadius:4, border:`2px solid ${item.done?"#a0aec0":"#FF6B35"}`, background:item.done?"#a0aec0":"transparent", cursor:"pointer", flexShrink:0, marginTop:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+            {item.done && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
           </button>
           {editing ? (
             <>
-              <input value={editVal} onChange={e => setEditVal(e.target.value)} onKeyDown={e => { if(e.key==="Enter") save(); if(e.key==="Escape") setEditing(false); }} autoFocus style={{ flex:1, fontSize:13, border:"1.5px solid "+cat.border, borderRadius:5, padding:"2px 6px", outline:"none" }} />
-              <button onClick={save} style={{ background:"none", border:"none", cursor:"pointer", color:cat.color, fontSize:13, fontWeight:700, padding:"0 4px" }}>저장</button>
+              <input value={editVal} onChange={e => setEditVal(e.target.value)} onKeyDown={e => { if(e.key==="Enter") save(); if(e.key==="Escape") setEditing(false); }} autoFocus style={{ flex:1, fontSize:13, border:"1.5px solid #FF6B35", borderRadius:5, padding:"2px 6px", outline:"none" }} />
+              <button onClick={save} style={{ background:"none", border:"none", cursor:"pointer", color:"#FF6B35", fontSize:13, fontWeight:700, padding:"0 4px" }}>저장</button>
               <button onClick={() => setEditing(false)} style={{ background:"none", border:"none", cursor:"pointer", color:"#a0aec0", fontSize:13, padding:"0 2px" }}>취소</button>
             </>
           ) : (
@@ -496,19 +502,16 @@
 
     function HistoryDay({ d, logs, logKey, onGoDay, onToggle, onDelete, onEdit }) {
       const [open, setOpen] = useState(true);
-      const dayData = logs[logKey] || {};
-      const total = CATS.reduce((s,c) => s + (dayData[c.key]||[]).length, 0);
-      const done  = CATS.reduce((s,c) => s + (dayData[c.key]||[]).filter(i=>i.done).length, 0);
+      const dayData = normalizeDayLog(logs[logKey]);
+      const items = dayData.items || [];
+      const total = items.length;
+      const done  = items.filter(i=>i.done).length;
       return (
         <div style={{ marginBottom:10, borderRadius:10, border:"1.5px solid #e2e8f0", overflow:"hidden", background:"#fff" }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", cursor:"pointer", background:"#f7fafc" }} onClick={() => setOpen(o=>!o)}>
-            <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ fontSize:14, fontWeight:500 }}>{dayLabel(d)}</span>
-              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                {CATS.map(c => { const cnt=(dayData[c.key]||[]).length; if(!cnt) return null;
-                  return <span key={c.key} style={{ fontSize:11, padding:"2px 7px", borderRadius:10, background:c.bg, color:c.color, border:`1px solid ${c.border}`, fontWeight:500 }}>{c.label} {cnt}</span>;
-                })}
-              </div>
+              {total > 0 && <span style={{ fontSize:11, padding:"2px 8px", borderRadius:10, background:"#edf2f7", color:"#718096", fontWeight:500 }}>항목 {total}</span>}
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
               <span style={{ fontSize:12, color: done===total&&total>0?"#276749":"#a0aec0" }}>{done}/{total}</span>
@@ -517,25 +520,13 @@
           </div>
           {open && (
             <div style={{ padding:"10px 14px" }}>
-              {CATS.map(cat => {
-                const items = dayData[cat.key] || [];
-                if (!items.length) return null;
-                return (
-                  <div key={cat.key} style={{ marginBottom:10 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
-                      <div style={{ width:3, height:14, borderRadius:2, background:cat.color }} />
-                      <span style={{ fontSize:13, fontWeight:500, color:cat.color }}>{cat.label}</span>
-                    </div>
-                    {items.map(item => (
-                      <ItemRow key={item.id} item={item} cat={cat}
-                        onToggle={(id) => onToggle(logKey, cat.key, id)}
-                        onDelete={(id) => onDelete(logKey, cat.key, id)}
-                        onEdit={(id, text) => onEdit(logKey, cat.key, id, text)} />
-                    ))}
-                  </div>
-                );
-              })}
-              <button onClick={onGoDay} style={{ fontSize:12, color:"#718096", background:"none", border:"1px solid #e2e8f0", borderRadius:6, padding:"4px 10px", cursor:"pointer", marginTop:2 }}>이 날짜로 이동 →</button>
+              {items.map(item => (
+                <ItemRow key={item.id} item={item}
+                  onToggle={(id) => onToggle(logKey, "items", id)}
+                  onDelete={(id) => onDelete(logKey, "items", id)}
+                  onEdit={(id, text) => onEdit(logKey, "items", id, text)} />
+              ))}
+              <button onClick={onGoDay} style={{ fontSize:12, color:"#FF6B35", background:"none", border:"1px solid #FF6B35", borderRadius:6, padding:"4px 10px", cursor:"pointer", marginTop:2 }}>이 날짜에 추가 ↑</button>
             </div>
           )}
         </div>
@@ -550,12 +541,12 @@
       const [sites, setSites]     = useState([]);
       const [curDate, setCurDate] = useState(today);
       const [logs, setLogs]       = useState({});
-      const [view, setView]       = useState("history");
-      const [inputs, setInputs]   = useState({ required:"", request:"", change:"" });
+      const [input, setInput]     = useState("");
       const [syncing, setSyncing] = useState(false);
       const [lastSync, setLastSync] = useState(null);
       const [loaded, setLoaded]   = useState(false);
-      const inputRefs = { required: useRef(), request: useRef(), change: useRef() };
+      const inputRef = useRef();
+      const topRef = useRef();
       const syncTimer = useRef(null);
       const curSite = siteId;
 
@@ -588,15 +579,15 @@
       };
 
       const logKey = curSite ? `${curSite}_${curDate}` : null;
-      const dayLog = logKey ? (logs[logKey] || { required:[], request:[], change:[] }) : null;
+      const dayLog = logKey ? normalizeDayLog(logs[logKey]) : null;
 
-      const addItem = (cat) => {
-        const text = inputs[cat].trim(); if (!text || !logKey) return;
+      const addItem = () => {
+        const text = input.trim(); if (!text || !logKey) return;
         const item = { id: Date.now(), text, done: false, createdAt: new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}) };
-        const nl = { ...logs, [logKey]: { ...dayLog, [cat]: [...(dayLog[cat]||[]), item] } };
+        const nl = { ...logs, [logKey]: { ...dayLog, items: [...(dayLog.items||[]), item] } };
         setLogs(nl); sync(sites, nl);
-        setInputs(p => ({ ...p, [cat]:"" }));
-        inputRefs[cat]?.current?.focus();
+        setInput("");
+        inputRef.current?.focus();
       };
       const toggleItem = (key, cat, id) => {
         const nl = { ...logs, [key]: { ...(logs[key]||{}), [cat]: (logs[key]?.[cat]||[]).map(i => i.id===id?{...i,done:!i.done}:i) } };
@@ -612,13 +603,16 @@
       };
 
       const siteDates = curSite
-        ? [...new Set(Object.keys(logs).filter(k=>k.startsWith(curSite+"_")).map(k=>k.replace(curSite+"_","")).filter(d=>CATS.some(c=>(logs[curSite+"_"+d]?.[c.key]||[]).length>0)))].sort((a,b)=>b.localeCompare(a))
+        ? [...new Set(Object.keys(logs).filter(k=>k.startsWith(curSite+"_")).map(k=>k.replace(curSite+"_","")).filter(d => normalizeDayLog(logs[curSite+"_"+d]).items.length > 0))].sort((a,b)=>b.localeCompare(a))
         : [];
 
       if (!loaded) return <div style={{ padding:32, color:"#a0aec0", textAlign:"center" }}>불러오는 중...</div>;
 
+      // 이전 날짜 목록 (현재 선택 날짜 제외, 항목 있는 날짜만)
+      const pastDates = siteDates.filter(d => d !== curDate);
+
       return (
-        <div style={{ maxWidth:680, margin:"0 auto", padding:"16px 12px" }}>
+        <div style={{ maxWidth:680, margin:"0 auto", padding:"16px 12px" }} ref={topRef}>
 
           <div style={{ textAlign:"right", fontSize:11, color:"#a0aec0", marginBottom:8 }}>
             {syncing ? "⏳ 저장 중..." : lastSync ? `✅ ${lastSync} 동기화됨` : ""}
@@ -628,54 +622,56 @@
             <div style={{ textAlign:"center", padding:"60px 0", color:"#a0aec0", fontSize:14 }}>현장을 추가해주세요</div>
           ) : (
             <>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, gap:8, flexWrap:"wrap" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <button onClick={()=>{ const d=new Date(curDate); d.setDate(d.getDate()-1); setCurDate(fmtDate(d)); setView("day"); }} style={navBtn}>‹</button>
-                  <input type="date" value={curDate} onChange={e=>{setCurDate(e.target.value);setView("day");}} style={{ fontSize:14, fontWeight:500, background:"none", border:"none", outline:"none", cursor:"pointer", color:"#2d3748" }} />
-                  <span style={{ fontSize:13, color:"#a0aec0" }}>({["일","월","화","수","목","금","토"][new Date(curDate).getDay()]})</span>
-                  <button onClick={()=>{ const d=new Date(curDate); d.setDate(d.getDate()+1); setCurDate(fmtDate(d)); setView("day"); }} style={navBtn}>›</button>
-                </div>
-                <div style={{ display:"flex", gap:4 }}>
-                  <button onClick={()=>setView("day")} style={{ ...viewBtn, fontWeight:view==="day"?500:400, borderColor:view==="day"?"#4a5568":"#e2e8f0", background:view==="day"?"#edf2f7":"none" }}>날짜별 입력</button>
-                  <button onClick={()=>setView("history")} style={{ ...viewBtn, fontWeight:view==="history"?500:400, borderColor:view==="history"?"#4a5568":"#e2e8f0", background:view==="history"?"#edf2f7":"none" }}>전체 이력</button>
-                </div>
+              {/* 날짜 네비게이터 */}
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+                <button onClick={()=>{ const d=new Date(curDate); d.setDate(d.getDate()-1); setCurDate(fmtDate(d)); }} style={navBtn}>‹</button>
+                <input type="date" value={curDate} onChange={e=>setCurDate(e.target.value)} style={{ fontSize:14, fontWeight:500, background:"none", border:"none", outline:"none", cursor:"pointer", color:"#2d3748" }} />
+                <span style={{ fontSize:13, color:"#a0aec0" }}>({["일","월","화","수","목","금","토"][new Date(curDate).getDay()]})</span>
+                <button onClick={()=>{ const d=new Date(curDate); d.setDate(d.getDate()+1); setCurDate(fmtDate(d)); }} style={navBtn}>›</button>
+                {curDate !== today && (
+                  <button onClick={()=>setCurDate(today)} style={{ marginLeft:"auto", fontSize:12, color:"#FF6B35", background:"none", border:"1px solid #FF6B35", borderRadius:6, padding:"3px 10px", cursor:"pointer" }}>오늘</button>
+                )}
               </div>
 
-              {view==="history" ? (
-                <div>
-                  {siteDates.length===0
-                    ? <div style={{ color:"#a0aec0", fontSize:14, padding:"40px 0", textAlign:"center" }}>아직 기록이 없습니다</div>
-                    : siteDates.map(d => (
-                        <HistoryDay key={d} d={d} logs={logs} logKey={`${curSite}_${d}`}
-                          onGoDay={()=>{ setCurDate(d); setView("day"); }}
-                          onToggle={toggleItem} onDelete={deleteItem} onEdit={editItem} />
-                      ))
-                  }
+              {/* 현재 날짜 입력 + 목록 */}
+              <div style={{ background:"#fff", borderRadius:12, border:"1.5px solid #e2e8f0", padding:"14px", marginBottom:16 }}>
+                <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                  <input
+                    ref={inputRef}
+                    value={input}
+                    onChange={e=>setInput(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&addItem()}
+                    placeholder="항목 추가... (Enter)"
+                    style={{ flex:1, padding:"10px 14px", fontSize:14, borderRadius:10, border:"1.5px solid #FF6B35", outline:"none" }}
+                  />
+                  <button onClick={addItem} style={{ padding:"10px 18px", fontSize:14, borderRadius:10, background:"#FF6B35", color:"#fff", border:"none", cursor:"pointer", fontWeight:600 }}>추가</button>
                 </div>
-              ) : (
-                CATS.map(cat => {
-                  const items = dayLog?.[cat.key] || [];
-                  return (
-                    <div key={cat.key} style={{ marginBottom:20 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                        <div style={{ width:4, height:18, borderRadius:2, background:cat.color }} />
-                        <span style={{ fontSize:15, fontWeight:500, color:cat.color }}>{cat.label}</span>
-                        <span style={{ fontSize:12, color:"#a0aec0" }}>{items.filter(i=>i.done).length}/{items.length}</span>
-                      </div>
-                      {items.length===0 && <div style={{ fontSize:13, color:"#a0aec0", padding:"8px 0 4px 12px" }}>항목 없음</div>}
-                      {items.map(item => (
-                        <ItemRow key={item.id} item={item} cat={cat}
-                          onToggle={(id) => toggleItem(logKey, cat.key, id)}
-                          onDelete={(id) => deleteItem(logKey, cat.key, id)}
-                          onEdit={(id, text) => editItem(logKey, cat.key, id, text)} />
-                      ))}
-                      <div style={{ display:"flex", gap:6, marginTop:6 }}>
-                        <input ref={inputRefs[cat.key]} value={inputs[cat.key]} onChange={e=>setInputs(p=>({...p,[cat.key]:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addItem(cat.key)} placeholder={`${cat.label} 항목 추가...`} style={{ flex:1, padding:"8px 12px", fontSize:13, borderRadius:8, border:"1.5px solid #e2e8f0", outline:"none" }} />
-                        <button onClick={()=>addItem(cat.key)} style={{ padding:"8px 16px", fontSize:13, borderRadius:8, background:cat.color, color:"#fff", border:"none", cursor:"pointer", fontWeight:500 }}>추가</button>
-                      </div>
-                    </div>
-                  );
-                })
+                {(dayLog?.items||[]).length === 0
+                  ? <div style={{ fontSize:13, color:"#a0aec0", padding:"12px 0 4px", textAlign:"center" }}>항목을 추가해보세요</div>
+                  : (dayLog?.items||[]).map(item => (
+                      <ItemRow key={item.id} item={item}
+                        onToggle={(id) => toggleItem(logKey, "items", id)}
+                        onDelete={(id) => deleteItem(logKey, "items", id)}
+                        onEdit={(id, text) => editItem(logKey, "items", id, text)} />
+                    ))
+                }
+                {(dayLog?.items||[]).length > 0 && (() => {
+                  const total = dayLog.items.length;
+                  const done = dayLog.items.filter(i=>i.done).length;
+                  return <div style={{ marginTop:8, fontSize:12, color:"#a0aec0", textAlign:"right" }}>{done}/{total} 완료{done===total&&total>0?" ✅":""}</div>;
+                })()}
+              </div>
+
+              {/* 이전 기록 */}
+              {pastDates.length > 0 && (
+                <>
+                  <div style={{ fontSize:12, fontWeight:500, color:"#a0aec0", marginBottom:8, paddingLeft:2 }}>이전 기록</div>
+                  {pastDates.map(d => (
+                    <HistoryDay key={d} d={d} logs={logs} logKey={`${curSite}_${d}`}
+                      onGoDay={()=>{ setCurDate(d); topRef.current?.scrollIntoView({ behavior:"smooth" }); }}
+                      onToggle={toggleItem} onDelete={deleteItem} onEdit={editItem} />
+                  ))}
+                </>
               )}
             </>
           )}
@@ -1242,7 +1238,7 @@
     const emptyForm = () => ({
       id: null,
       date: today,
-      process: "",
+      processes: [],
       processCustom: "",
       area: "",
       content: "",
@@ -1311,11 +1307,13 @@
         try {
           const result = await parseDailyLogWithAI(aiText.trim(), apiKey);
           setForm(f => {
-            const matched = PROCESS_LIST.includes(result.process);
+            const aiProcess = result.process ? result.process.trim() : "";
+            const newProcesses = aiProcess && !f.processes.includes(aiProcess)
+              ? [...f.processes, aiProcess]
+              : f.processes;
             return {
               ...f,
-              process: matched ? result.process : "__custom__",
-              processCustom: !matched && result.process ? result.process : f.processCustom,
+              processes: newProcesses,
               area: result.area || f.area,
               content: result.content || f.content,
               workers: (result.workers && result.workers.length) ? result.workers.map(w => ({ role: w.role||"", count: Number(w.count)||1, laborCost: Number(w.laborCost)||0 })) : f.workers,
@@ -1335,8 +1333,10 @@
       };
 
       const sorted = [...logs].sort((a,b) => b.date.localeCompare(a.date) || (b.id||"").localeCompare(a.id||""));
-      const processOptions = [...new Set(logs.map(l => l.process).filter(Boolean))];
-      const filtered = filterProcess ? sorted.filter(l => l.process === filterProcess) : sorted;
+      // 구공정(문자열)과 신공정(배열) 모두 지원
+      const getLogProcesses = (l) => Array.isArray(l.processes) && l.processes.length ? l.processes : (l.process ? [l.process] : []);
+      const processOptions = [...new Set(logs.flatMap(l => getLogProcesses(l)).filter(Boolean))];
+      const filtered = filterProcess ? sorted.filter(l => getLogProcesses(l).includes(filterProcess)) : sorted;
       const grandTotal = logs.reduce((s,l) => s + (Number(l.totalCost)||0), 0);
 
       const openNew = () => { setForm(emptyForm()); setRemovedPhotos([]); setView("form"); };
@@ -1354,9 +1354,14 @@
         });
       };
       const openEdit = (log) => {
+        // 구형(process: 문자열) → 신형(processes: 배열) 호환 변환
+        const processes = Array.isArray(log.processes) && log.processes.length
+          ? log.processes
+          : (log.process ? [log.process] : []);
         setForm({
           ...emptyForm(),
           ...log,
+          processes,
           workers: log.workers?.length ? log.workers : emptyForm().workers,
           materials: log.materials?.length ? log.materials : emptyForm().materials,
           equipment: log.equipment?.length ? log.equipment : emptyForm().equipment,
@@ -1374,8 +1379,9 @@
       const removeRow = (key, idx) => setForm(f => ({ ...f, [key]: f[key].filter((_,i) => i!==idx) }));
 
       const save = async () => {
-        const process = form.process === "__custom__" ? form.processCustom.trim() : form.process;
-        if (!process) { alert("공정을 선택하거나 입력해주세요."); return; }
+        const processes = form.processes.filter(Boolean);
+        if (processes.length === 0) { alert("공정을 하나 이상 선택하거나 입력해주세요."); return; }
+        const process = processes[0]; // 하위 호환용 첫 공정
         const id = form.id || newId("log");
         const totalCost = calcTotal(form);
         setSaving(true);
@@ -1397,6 +1403,7 @@
         const data = {
           siteId,
           date: form.date,
+          processes,
           process,
           area: form.area,
           content: form.content,
@@ -1446,15 +1453,59 @@
               <label style={dl.label}>날짜</label>
               <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{...dl.input, marginBottom:10}} />
 
-              <label style={dl.label}>공정</label>
-              <select value={form.process} onChange={e=>setForm(f=>({...f,process:e.target.value}))} style={{...dl.input, marginBottom:10}}>
-                <option value="">공정 선택...</option>
-                {PROCESS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+              <label style={dl.label}>공정 <span style={{ fontWeight:400, color:"#a0aec0", fontSize:11 }}>(여러 공정 추가 가능)</span></label>
+              {/* 선택된 공정 태그 */}
+              {form.processes.length > 0 && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                  {form.processes.map((p, i) => (
+                    <span key={i} style={{ display:"inline-flex", alignItems:"center", gap:4, background:"#FF6B35", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:13, fontWeight:600 }}>
+                      {p}
+                      <button onClick={()=>setForm(f=>({...f, processes: f.processes.filter((_,j)=>j!==i)}))} style={{ background:"none", border:"none", color:"rgba(255,255,255,0.85)", fontSize:15, cursor:"pointer", padding:0, lineHeight:1 }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {/* 공정 추가 드롭다운 */}
+              <select
+                value=""
+                onChange={e => {
+                  const val = e.target.value;
+                  if (!val) return;
+                  if (val === "__custom__") { setForm(f=>({...f, processCustom: ""})); return; }
+                  if (!form.processes.includes(val)) setForm(f=>({...f, processes: [...f.processes, val], processCustom: ""}));
+                  e.target.value = "";
+                }}
+                style={{...dl.input, marginBottom: form.processCustom !== undefined && form.processCustom !== null ? 6 : 10, color:"#a0aec0"}}
+              >
+                <option value="">+ 공정 추가...</option>
+                {PROCESS_LIST.filter(p => !form.processes.includes(p)).map(p => <option key={p} value={p}>{p}</option>)}
                 <option value="__custom__">직접 입력...</option>
               </select>
-              {form.process === "__custom__" && (
-                <input value={form.processCustom} onChange={e=>setForm(f=>({...f,processCustom:e.target.value}))} placeholder="공정명 입력" style={{...dl.input, marginBottom:10}} />
-              )}
+              {/* 직접 입력 필드 */}
+              <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+                <input
+                  value={form.processCustom}
+                  onChange={e=>setForm(f=>({...f, processCustom:e.target.value}))}
+                  onKeyDown={e=>{
+                    if(e.key==="Enter" && form.processCustom.trim()) {
+                      const val = form.processCustom.trim();
+                      if (!form.processes.includes(val)) setForm(f=>({...f, processes:[...f.processes,val], processCustom:""}));
+                      else setForm(f=>({...f, processCustom:""}));
+                    }
+                  }}
+                  placeholder="공정명 직접 입력 후 추가 버튼"
+                  style={{...dl.input, flex:1}}
+                />
+                <button
+                  onClick={()=>{
+                    const val = form.processCustom.trim();
+                    if (!val) return;
+                    if (!form.processes.includes(val)) setForm(f=>({...f, processes:[...f.processes,val], processCustom:""}));
+                    else setForm(f=>({...f, processCustom:""}));
+                  }}
+                  style={{ background:"#FF6B35", color:"#fff", border:"none", borderRadius:8, padding:"0 14px", fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}
+                >추가</button>
+              </div>
 
               <label style={dl.label}>작업구역</label>
               <input value={form.area} onChange={e=>setForm(f=>({...f,area:e.target.value}))} placeholder="예: 욕실, 거실, 전체" style={{...dl.input, marginBottom:10}} />
@@ -1595,7 +1646,7 @@
             <div key={log.id} style={dl.card} onClick={()=>openEdit(log)}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>{dayLabel(log.date)} · {log.process}{log.photos?.length > 0 && <span style={{ marginLeft:6, fontSize:12, color:"#a0aec0" }}>📷 {log.photos.length}</span>}</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e" }}>{dayLabel(log.date)} · {getLogProcesses(log).join(" · ") || "공정 없음"}{log.photos?.length > 0 && <span style={{ marginLeft:6, fontSize:12, color:"#a0aec0" }}>📷 {log.photos.length}</span>}</div>
                   {log.area && <div style={{ fontSize:12, color:"#a0aec0", marginTop:2 }}>📍 {log.area}</div>}
                   {log.content && <div style={{ fontSize:13, color:"#4a5568", marginTop:6, lineHeight:1.5 }}>{log.content}</div>}
                   {log.photos?.length > 0 && (
