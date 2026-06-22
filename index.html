@@ -29,6 +29,18 @@
     const db = firebase.firestore();
     const storage = firebase.storage();
 
+    // 오프라인 persistence: 오프라인 상태에서 입력한 내용을 로컬에 큐잉해두고
+    // 재연결되면 자동으로 Firestore와 동기화한다.
+    db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
+      if (err.code === "failed-precondition") {
+        console.warn("Firestore persistence: 여러 탭이 열려 있어 한 탭에서만 활성화됩니다.");
+      } else if (err.code === "unimplemented") {
+        console.warn("Firestore persistence: 이 브라우저는 오프라인 저장을 지원하지 않습니다.");
+      } else {
+        console.warn("Firestore persistence 활성화 실패", err);
+      }
+    });
+
     // ---- 사진 업로드 (Firebase Storage) ----
     async function uploadPhoto(file, pathPrefix) {
       const ext = (file.name && file.name.includes(".")) ? file.name.split(".").pop() : "jpg";
@@ -292,6 +304,10 @@
       padding: 0 18px; border-radius: 10px; border: none; background: #FF6B35; color: #fff;
       font-weight: 700; font-size: 14px; cursor: pointer;
     }
+
+    /* 삭제(X) 버튼: 기본 회색, hover/active 시에만 빨간색 강조 */
+    .x-remove-btn { color: #a0aec0; transition: color 0.15s; }
+    .x-remove-btn:hover, .x-remove-btn:active { color: #e53e3e; }
 
     /* 헤더 현장 변경 버튼 */
     .switch-site-btn {
@@ -769,7 +785,7 @@
         if (!name) return;
         const id = newId("task");
         const data = {
-          name, detail: addForm.detail||"", startDate: addForm.startDate, endDate: addForm.endDate || addForm.startDate,
+          name, detail: addForm.detail||"", startDate: addForm.startDate, endDate: (addForm.endDate && addForm.endDate >= addForm.startDate) ? addForm.endDate : addForm.startDate,
           status: addForm.status, color: STATUS_COLOR[addForm.status], siteId,
         };
         setTasks(ts => [...ts, { id, ...data }]);
@@ -788,7 +804,7 @@
         const patch = {
           name: editedName || tasks.find(t=>t.id===editingId).name,
           detail: editForm.detail||"",
-          startDate: editForm.startDate, endDate: editForm.endDate || editForm.startDate,
+          startDate: editForm.startDate, endDate: (editForm.endDate && editForm.endDate >= editForm.startDate) ? editForm.endDate : editForm.startDate,
           status: editForm.status, color: STATUS_COLOR[editForm.status],
         };
         setTasks(ts => ts.map(t => t.id === editingId ? { ...t, ...patch } : t));
@@ -865,6 +881,12 @@
               <span style={{ width:12, height:12, borderRadius:3, background:"#FFE9A8", border:"1px solid #FFC107", display:"inline-block" }} />
               오늘
             </div>
+            {view === "calendar" && (
+              <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <span style={{ width:14, height:14, borderRadius:"50%", background:"#4472C4", color:"#fff", fontSize:8, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>☔</span>
+                강수확률 {RAIN_ALERT_THRESHOLD}%↑
+              </div>
+            )}
             <div style={{ marginLeft:"auto", display:"flex", gap:4 }}>
               <button onClick={()=>setView("gantt")} style={{
                 border:"1px solid #e2e8f0", borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer",
@@ -911,7 +933,7 @@
               <div style={dl.row}>
                 <input type="date" value={addForm.startDate} onChange={e=>setAddForm(f=>({...f,startDate:e.target.value,endDate:e.target.value>f.endDate?e.target.value:f.endDate}))} style={{...dl.input, flex:1}} />
                 <span style={{ color:"#a0aec0" }}>~</span>
-                <input type="date" value={addForm.endDate} onChange={e=>setAddForm(f=>({...f,endDate:e.target.value}))} style={{...dl.input, flex:1}} />
+                <input type="date" value={addForm.endDate} onChange={e=>setAddForm(f=>({...f,endDate: e.target.value < f.startDate ? f.startDate : e.target.value}))} style={{...dl.input, flex:1}} />
               </div>
               <select value={addForm.status} onChange={e=>setAddForm(f=>({...f,status:e.target.value}))} style={{...dl.input, marginBottom:8}}>
                 {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
@@ -982,7 +1004,7 @@
                             <input value={editForm.detail||""} onChange={e=>setEditForm(f=>({...f, detail: e.target.value}))} placeholder="세부 공정 내용" style={{ width:"100%", fontSize:10, padding:"2px 3px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none", color:"#555" }} />
                             <div style={{ display:"flex", gap:2 }}>
                               <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value,endDate:e.target.value>f.endDate?e.target.value:f.endDate}))} style={{ flex:1, fontSize:9, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} />
-                              <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate:e.target.value}))} style={{ flex:1, fontSize:9, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} />
+                              <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate: e.target.value < f.startDate ? f.startDate : e.target.value}))} style={{ flex:1, fontSize:9, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }} />
                             </div>
                             <div style={{ display:"flex", gap:2 }}>
                               <select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} style={{ flex:1, fontSize:10, padding:"2px 2px", border:"1px solid #e2e8f0", borderRadius:3, outline:"none" }}>
@@ -1046,6 +1068,7 @@
           {view === "calendar" && (
             <CalendarView
               tasks={tasks}
+              weather={weather}
               calMonth={calMonth}
               setCalMonth={setCalMonth}
               selectedDay={selectedDay}
@@ -1066,7 +1089,9 @@
     }
 
     /* ---- 공정표 달력 뷰 ---- */
-    function CalendarView({ tasks, calMonth, setCalMonth, selectedDay, setSelectedDay, today, toggleDone, startEdit, removeTask, editingId, editForm, setEditForm, saveEdit, cancelEdit }) {
+    const RAIN_ALERT_THRESHOLD = 50; // 강수확률(%) 이 값 이상이면 "우천 주의" 배지 표시
+
+    function CalendarView({ tasks, weather, calMonth, setCalMonth, selectedDay, setSelectedDay, today, toggleDone, startEdit, removeTask, editingId, editForm, setEditForm, saveEdit, cancelEdit }) {
       const [y, m] = calMonth.split("-").map(Number);
 
       const tasksByDate = useMemo(() => {
@@ -1117,26 +1142,36 @@
                 const isToday = d === today;
                 const isSel = d === selectedDay;
                 const hasDelay = dayTasks.some(t => isDelayed(t, today));
+                const dayPop = weather && weather[d] ? weather[d].pop : null;
+                const rainAlert = dayPop != null && dayPop >= RAIN_ALERT_THRESHOLD;
                 return (
-                  <div key={d} onClick={()=>setSelectedDay(isSel ? null : d)} style={{
-                    height:46, borderRadius:8, padding:"5px 2px 4px", cursor:"pointer",
+                  <div key={d} onClick={()=>setSelectedDay(isSel ? null : d)} title={rainAlert ? `우천 주의 (강수확률 ${dayPop}%)` : undefined} style={{
+                    height:50, borderRadius:8, padding:"5px 2px 4px", cursor:"pointer", position:"relative",
                     border: isToday ? "2px solid #FFC107" : isSel ? "2px solid #FF6B35" : "1px solid #f0f0f3",
                     background: isSel ? "#FFF3E0" : (isToday ? "#FFF8E8" : "#fff"),
                     display:"flex", flexDirection:"column", alignItems:"center", gap:3,
                   }}>
                     <div style={{ fontSize:12, fontWeight: isToday?900:500, lineHeight:1, color: dow===0?"#e53e3e":dow===6?"#2b6cb0":"#4a5568" }}>{Number(d.slice(8))}</div>
                     {dayTasks.length > 0 && (
-                      <div style={{ display:"flex", gap:2, flexWrap:"wrap", justifyContent:"center" }}>
+                      <div style={{ display:"flex", gap:3, flexWrap:"wrap", justifyContent:"center" }}>
                         {dayTasks.slice(0,4).map((t,ti) => (
                           <div key={ti} style={{
-                            width:6, height:6, borderRadius:"50%",
+                            width:8, height:8, borderRadius:"50%",
                             background: hasDelay && isDelayed(t,today) ? DELAY_COLOR : (t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned),
                             opacity: t.status==="done" ? 0.45 : 1,
                             flexShrink:0,
                           }} title={t.name} />
                         ))}
-                        {dayTasks.length > 4 && <div style={{ fontSize:8, color:"#a0aec0", lineHeight:1 }}>+{dayTasks.length-4}</div>}
+                        {dayTasks.length > 4 && <div style={{ fontSize:9, fontWeight:700, color:"#a0aec0", lineHeight:1 }}>+{dayTasks.length-4}</div>}
                       </div>
+                    )}
+                    {rainAlert && (
+                      <div style={{
+                        position:"absolute", top:-6, right:-4,
+                        fontSize:9, lineHeight:1, background:"#4472C4", color:"#fff",
+                        borderRadius:"50%", width:16, height:16, display:"flex", alignItems:"center", justifyContent:"center",
+                        boxShadow:"0 1px 2px rgba(0,0,0,0.25)", zIndex:1,
+                      }}>☔</div>
                     )}
                   </div>
                 );
@@ -1183,7 +1218,7 @@
                     <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
                       <input type="date" value={editForm.startDate} onChange={e=>setEditForm(f=>({...f,startDate:e.target.value,endDate:e.target.value>f.endDate?e.target.value:f.endDate}))} style={{...dl.input, flex:1, fontSize:12}} />
                       <span style={{ color:"#a0aec0", flexShrink:0 }}>~</span>
-                      <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate:e.target.value}))} style={{...dl.input, flex:1, fontSize:12}} />
+                      <input type="date" value={editForm.endDate} onChange={e=>setEditForm(f=>({...f,endDate: e.target.value < f.startDate ? f.startDate : e.target.value}))} style={{...dl.input, flex:1, fontSize:12}} />
                     </div>
                     <select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} style={{...dl.input, marginBottom:8, fontSize:13}}>
                       {Object.entries(STATUS_LABEL).map(([k,label]) => <option key={k} value={k}>{label}</option>)}
@@ -1230,7 +1265,7 @@
       row: { display:"flex", gap:6, marginBottom:6, alignItems:"center" },
       sectionTitle: { fontSize:14, fontWeight:700, color:"#1a1a2e", marginBottom:8, display:"flex", alignItems:"center", gap:6 },
       smallBtn: { background:"none", border:"1.5px dashed #cbd5e0", borderRadius:8, padding:"6px 12px", fontSize:12, color:"#a0aec0", cursor:"pointer" },
-      removeBtn: { background:"none", border:"none", color:"#e53e3e", fontSize:18, cursor:"pointer", flexShrink:0, padding:"0 4px" },
+      removeBtn: { background:"none", border:"none", fontSize:18, cursor:"pointer", flexShrink:0, padding:"0 4px" },
       primaryBtn: { background:"#FF6B35", color:"#fff", border:"none", borderRadius:10, padding:"13px 0", fontSize:15, fontWeight:700, cursor:"pointer", width:"100%" },
       secondaryBtn: { background:"none", border:"1.5px solid #e2e8f0", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:500, cursor:"pointer", color:"#718096", width:"100%" },
     };
@@ -1290,6 +1325,15 @@
       const [apiKey, setApiKey] = useState("");
       const [aiText, setAiText] = useState("");
       const [aiLoading, setAiLoading] = useState(false);
+      const contentRef = useRef(null);
+
+      // 작업내용 textarea 자동 높이 조절 (내용이 길어져도 가려지지 않도록)
+      useEffect(() => {
+        if (contentRef.current) {
+          contentRef.current.style.height = "auto";
+          contentRef.current.style.height = contentRef.current.scrollHeight + "px";
+        }
+      }, [form.content, view]);
 
       useEffect(() => {
         (async () => {
@@ -1435,7 +1479,7 @@
       if (view === "form") {
         return (
           <>
-          <div className="placeholder-wrap">
+          <div className="placeholder-wrap" style={{ paddingTop: 36 }}>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
               <button onClick={()=>setView("list")} style={{ background:"none", border:"none", fontSize:22, color:"#1a1a2e", cursor:"pointer", padding:"0 4px 0 0", lineHeight:1 }}>←</button>
               <div style={{ ...dl.sectionTitle, marginBottom:0 }}>{form.id ? "작업일지 수정" : "새 작업일지"}</div>
@@ -1466,6 +1510,7 @@
                 </div>
               )}
               {/* 공정 추가 드롭다운 */}
+              <div style={{ fontSize:10, color:"#cbd5e0", marginBottom:3 }}>프리셋에서 선택</div>
               <select
                 value=""
                 onChange={e => {
@@ -1482,6 +1527,7 @@
                 <option value="__custom__">직접 입력...</option>
               </select>
               {/* 직접 입력 필드 */}
+              <div style={{ fontSize:10, color:"#cbd5e0", marginBottom:3 }}>또는 직접 입력</div>
               <div style={{ display:"flex", gap:6, marginBottom:10 }}>
                 <input
                   value={form.processCustom}
@@ -1511,17 +1557,25 @@
               <input value={form.area} onChange={e=>setForm(f=>({...f,area:e.target.value}))} placeholder="예: 욕실, 거실, 전체" style={{...dl.input, marginBottom:10}} />
 
               <label style={dl.label}>작업내용</label>
-              <textarea value={form.content} onChange={e=>setForm(f=>({...f,content:e.target.value}))} placeholder="오늘 진행한 작업 내용" rows={3} style={{...dl.input, resize:"vertical"}} />
+              <textarea ref={contentRef} value={form.content} onChange={e=>setForm(f=>({...f,content:e.target.value}))} placeholder="오늘 진행한 작업 내용" rows={3} style={{...dl.input, resize:"vertical", overflow:"hidden", minHeight:72}} />
             </div>
 
             <div style={dl.card}>
               <div style={dl.sectionTitle}>👷 투입인원</div>
+              {form.workers.length > 0 && (
+                <div style={{ display:"flex", gap:6, marginBottom:4, padding:"0 1px" }}>
+                  <span style={{ flex:2, fontSize:11, fontWeight:700, color:"#a0aec0" }}>역할</span>
+                  <span style={{ flex:1, fontSize:11, fontWeight:700, color:"#a0aec0" }}>인원</span>
+                  <span style={{ flex:2, fontSize:11, fontWeight:700, color:"#a0aec0" }}>인건비(합계)</span>
+                  <span style={{ width:22, flexShrink:0 }} />
+                </div>
+              )}
               {form.workers.map((w,i) => (
                 <div key={i} style={dl.row}>
                   <input value={w.role} onChange={e=>updateArr("workers",i,"role",e.target.value)} placeholder="역할(예: 목수)" style={{...dl.input, flex:2}} />
-                  <input type="number" value={w.count} onChange={e=>updateArr("workers",i,"count",e.target.value)} onFocus={e=>e.target.select()} placeholder="인원" style={{...dl.input, flex:1}} />
-                  <input type="number" value={w.laborCost} onChange={e=>updateArr("workers",i,"laborCost",e.target.value)} onFocus={e=>e.target.select()} placeholder="인건비(합계)" style={{...dl.input, flex:2}} />
-                  <button onClick={()=>removeRow("workers",i)} style={dl.removeBtn}>×</button>
+                  <input type="number" inputMode="numeric" value={w.count} onChange={e=>updateArr("workers",i,"count",e.target.value)} onFocus={e=>e.target.select()} placeholder="인원" style={{...dl.input, flex:1}} />
+                  <input type="number" inputMode="numeric" value={w.laborCost} onChange={e=>updateArr("workers",i,"laborCost",e.target.value)} onFocus={e=>e.target.select()} placeholder="인건비(합계)" style={{...dl.input, flex:2}} />
+                  <button onClick={()=>removeRow("workers",i)} className="x-remove-btn" style={{...dl.removeBtn, width:22}}>×</button>
                 </div>
               ))}
               <button style={dl.smallBtn} onClick={()=>addRow("workers",{role:"",count:1,laborCost:0})}>+ 인원 추가</button>
@@ -1535,7 +1589,7 @@
                 <div key={i} style={{ marginBottom:10, background:"#f9fafb", borderRadius:8, padding:"8px 10px" }}>
                   <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
                     <input value={m.name} onChange={e=>updateArr("materials",i,"name",e.target.value)} placeholder="자재명" style={{...dl.input, flex:1}} />
-                    <button onClick={()=>removeRow("materials",i)} style={dl.removeBtn}>×</button>
+                    <button onClick={()=>removeRow("materials",i)} className="x-remove-btn" style={dl.removeBtn}>×</button>
                   </div>
                   <div style={{ display:"flex", gap:4, alignItems:"center", flexWrap:"wrap" }}>
                     <input type="number" value={m.totalPrice||""} onChange={e=>updateArr("materials",i,"totalPrice",e.target.value)} onFocus={e=>e.target.select()} placeholder="총금액 직접 입력" style={{...dl.input, flex:"1 1 120px", background: useTotalPrice?"#fff3eb":"#fff", border: useTotalPrice?"1.5px solid #FF6B35":"1.5px solid #e2e8f0"}} />
@@ -1557,7 +1611,7 @@
                 <div key={i} style={dl.row}>
                   <input value={e2.name} onChange={e=>updateArr("equipment",i,"name",e.target.value)} placeholder="장비명(예: 리프트)" style={{...dl.input, flex:2}} />
                   <input type="number" value={e2.cost} onChange={e=>updateArr("equipment",i,"cost",e.target.value)} onFocus={e=>e.target.select()} placeholder="임대비" style={{...dl.input, flex:1}} />
-                  <button onClick={()=>removeRow("equipment",i)} style={dl.removeBtn}>×</button>
+                  <button onClick={()=>removeRow("equipment",i)} className="x-remove-btn" style={dl.removeBtn}>×</button>
                 </div>
               ))}
               <button style={dl.smallBtn} onClick={()=>addRow("equipment",{name:"",cost:0})}>+ 장비 추가</button>
@@ -1570,7 +1624,7 @@
                   <div style={dl.row}>
                     <input value={o.name} onChange={e=>updateArr("otherCosts",i,"name",e.target.value)} placeholder="항목명(예: 식대, 주차비)" style={{...dl.input, flex:2}} />
                     <input type="number" value={o.amount} onChange={e=>updateArr("otherCosts",i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
-                    <button onClick={()=>removeRow("otherCosts",i)} style={dl.removeBtn}>×</button>
+                    <button onClick={()=>removeRow("otherCosts",i)} className="x-remove-btn" style={dl.removeBtn}>×</button>
                   </div>
                   <select value={o.process||""} onChange={e=>updateArr("otherCosts",i,"process",e.target.value)} style={{ width:"100%", fontSize:11, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:6, outline:"none", color: o.process ? "#2d3748" : "#a0aec0", background:"#f7f8fa" }}>
                     <option value="">공정 지정 안 함 → 일지 공정 따름</option>
@@ -1596,7 +1650,7 @@
               )}
               <label style={{ ...dl.smallBtn, display:"inline-block" }}>
                 + 사진 추가
-                <input type="file" accept="image/*" multiple capture="environment" onChange={e=>{ if(e.target.files?.length) addPhotos(e.target.files); e.target.value=""; }} style={{ display:"none" }} />
+                <input type="file" accept="image/*" multiple onChange={e=>{ if(e.target.files?.length) addPhotos(e.target.files); e.target.value=""; }} style={{ display:"none" }} />
               </label>
             </div>
 
@@ -1622,7 +1676,7 @@
 
       return (
         <>
-        <div className="placeholder-wrap">
+        <div className="placeholder-wrap" style={{ paddingTop: 36 }}>
           <div style={{ ...dl.card, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <div>
               <div style={{ fontSize:12, color:"#a0aec0" }}>누적 총비용</div>
@@ -1664,7 +1718,7 @@
                 </div>
                 <div style={{ textAlign:"right", flexShrink:0 }}>
                   <div style={{ fontSize:14, fontWeight:900, color:"#FF6B35" }}>{fmtMoney(log.totalCost)}</div>
-                  <button onClick={(e)=>{ e.stopPropagation(); removeLog(log.id); }} style={{ ...dl.removeBtn, marginTop:4 }}>삭제</button>
+                  <button onClick={(e)=>{ e.stopPropagation(); removeLog(log.id); }} className="x-remove-btn" style={{ ...dl.removeBtn, marginTop:4 }}>삭제</button>
                 </div>
               </div>
             </div>
@@ -2056,7 +2110,7 @@
                   <div style={{ display:"flex", gap:6, marginBottom:3, alignItems:"center" }}>
                     <input value={it.name} onChange={e=>quickUpdateItem(i,"name",e.target.value)} placeholder="항목명 (예: 식대, 폐기물처리비)" style={{...dl.input, flex:2}} />
                     <input type="number" value={it.amount} onChange={e=>quickUpdateItem(i,"amount",e.target.value)} onFocus={e=>e.target.select()} placeholder="금액" style={{...dl.input, flex:1}} />
-                    {quickForm.items.length > 1 && <button onClick={()=>quickRemoveItem(i)} style={dl.removeBtn}>×</button>}
+                    {quickForm.items.length > 1 && <button onClick={()=>quickRemoveItem(i)} className="x-remove-btn" style={dl.removeBtn}>×</button>}
                   </div>
                   <select value={it.process||""} onChange={e=>quickUpdateItem(i,"process",e.target.value)} style={{ width:"100%", fontSize:11, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:6, outline:"none", color: it.process ? "#2d3748" : "#a0aec0", background:"#f7f8fa" }}>
                     <option value="">공정 지정 안 함 → 위 공정 따름</option>
@@ -2285,9 +2339,9 @@
                   {quickLaborForm.workers.map((w,i) => (
                     <div key={i} style={{ display:"flex", gap:5, marginBottom:6, alignItems:"center" }}>
                       <input value={w.role} onChange={e=>quickLaborUpdate(i,"role",e.target.value)} placeholder="팀/직종명 (예: 조적팀)" style={{...dl.input, flex:3}} />
-                      <input type="number" value={w.count} onChange={e=>quickLaborUpdate(i,"count",e.target.value)} onFocus={e=>e.target.select()} placeholder="인원" style={{...dl.input, flex:1, minWidth:48}} min={1} />
-                      <input type="number" value={w.laborCost} onChange={e=>quickLaborUpdate(i,"laborCost",e.target.value)} onFocus={e=>e.target.select()} placeholder="인건비" style={{...dl.input, flex:2}} />
-                      {quickLaborForm.workers.length > 1 && <button onClick={()=>quickLaborRemove(i)} style={dl.removeBtn}>×</button>}
+                      <input type="number" inputMode="numeric" value={w.count} onChange={e=>quickLaborUpdate(i,"count",e.target.value)} onFocus={e=>e.target.select()} placeholder="인원" style={{...dl.input, flex:1, minWidth:48}} min={1} />
+                      <input type="number" inputMode="numeric" value={w.laborCost} onChange={e=>quickLaborUpdate(i,"laborCost",e.target.value)} onFocus={e=>e.target.select()} placeholder="인건비" style={{...dl.input, flex:2}} />
+                      {quickLaborForm.workers.length > 1 && <button onClick={()=>quickLaborRemove(i)} className="x-remove-btn" style={dl.removeBtn}>×</button>}
                     </div>
                   ))}
                   <button style={dl.smallBtn} onClick={quickLaborAdd}>+ 팀·직종 추가</button>
@@ -2381,8 +2435,8 @@
                                 {laborEditWorkers.map((w,i) => (
                                   <div key={i} style={{ display:"flex", gap:4, marginBottom:5, alignItems:"center" }}>
                                     <input value={w.role} onChange={e=>setLaborEditWorkers(ws=>ws.map((x,j)=>j===i?{...x,role:e.target.value}:x))} placeholder="팀·직종 (예: 조적공)" style={{ flex:3, fontSize:12, padding:"5px 7px", border:"1px solid #e2e8f0", borderRadius:5, outline:"none" }} />
-                                    <input type="number" value={w.count} onChange={e=>setLaborEditWorkers(ws=>ws.map((x,j)=>j===i?{...x,count:e.target.value}:x))} onFocus={e=>e.target.select()} placeholder="인원" style={{ flex:1, fontSize:12, padding:"5px 4px", border:"1px solid #e2e8f0", borderRadius:5, outline:"none", textAlign:"center" }} />
-                                    <input type="number" value={w.laborCost} onChange={e=>setLaborEditWorkers(ws=>ws.map((x,j)=>j===i?{...x,laborCost:e.target.value}:x))} onFocus={e=>e.target.select()} placeholder="인건비" style={{ flex:2, fontSize:12, padding:"5px 4px", border:"1px solid #e2e8f0", borderRadius:5, outline:"none" }} />
+                                    <input type="number" inputMode="numeric" value={w.count} onChange={e=>setLaborEditWorkers(ws=>ws.map((x,j)=>j===i?{...x,count:e.target.value}:x))} onFocus={e=>e.target.select()} placeholder="인원" style={{ flex:1, fontSize:12, padding:"5px 4px", border:"1px solid #e2e8f0", borderRadius:5, outline:"none", textAlign:"center" }} />
+                                    <input type="number" inputMode="numeric" value={w.laborCost} onChange={e=>setLaborEditWorkers(ws=>ws.map((x,j)=>j===i?{...x,laborCost:e.target.value}:x))} onFocus={e=>e.target.select()} placeholder="인건비" style={{ flex:2, fontSize:12, padding:"5px 4px", border:"1px solid #e2e8f0", borderRadius:5, outline:"none" }} />
                                     {laborEditWorkers.length > 1 && <button onClick={()=>setLaborEditWorkers(ws=>ws.filter((_,j)=>j!==i))} style={{ background:"none", border:"none", color:"#e53e3e", fontSize:16, cursor:"pointer", padding:"0 2px", lineHeight:1 }}>×</button>}
                                   </div>
                                 ))}
@@ -2537,7 +2591,7 @@
                     </div>
                   </div>
                   <button onClick={()=>cycleStatus(item)} style={{ background:MATERIAL_STATUS_COLOR[item.status||"필요"], color:"#fff", border:"none", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", flexShrink:0 }}>{item.status||"필요"}</button>
-                  <button onClick={()=>removeItem(item.id)} style={dl.removeBtn}>×</button>
+                  <button onClick={()=>removeItem(item.id)} className="x-remove-btn" style={dl.removeBtn}>×</button>
                 </div>
               );})}
             </div>
@@ -2629,7 +2683,7 @@
                   </div>
                   <a href={`tel:${c.phone}`} style={{ background:"#48BB78", color:"#fff", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, textDecoration:"none", flexShrink:0 }}>📞 전화</a>
                   <a href={`sms:${c.phone}`} style={{ background:"#4472C4", color:"#fff", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, textDecoration:"none", flexShrink:0 }}>💬 문자</a>
-                  <button onClick={()=>removeContact(c.id)} style={dl.removeBtn}>×</button>
+                  <button onClick={()=>removeContact(c.id)} className="x-remove-btn" style={dl.removeBtn}>×</button>
                 </div>
               ))}
             </div>
