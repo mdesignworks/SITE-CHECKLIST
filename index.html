@@ -2749,6 +2749,13 @@
 
           const wb = XLSX.utils.book_new();
 
+          // 전체 합계 (시트1·4 공용 — if 블록 밖에서 미리 계산)
+          const tL = sorted.reduce((s,l)=>(l.workers||[]).reduce((ss,w)=>ss+(Number(w.laborCost)||0),s),0);
+          const tM = sorted.reduce((s,l)=>(l.materials||[]).reduce((ss,m)=>ss+calcMaterialCost(m),s),0);
+          const tE = sorted.reduce((s,l)=>(l.equipment||[]).reduce((ss,e)=>ss+(Number(e.cost)||0),s),0);
+          const tO = sorted.reduce((s,l)=>s+otherCostsTotal(l.otherCosts),0);
+          const gT = tL+tM+tE+tO;
+
           // ===== 시트1: 일일작업일지 =====
           if (include("일일작업일지")) {
           const ws1 = [
@@ -2785,11 +2792,6 @@
               l.note||""
             ]);
           });
-          const tL = sorted.reduce((s,l)=>(l.workers||[]).reduce((ss,w)=>ss+(Number(w.laborCost)||0),s),0);
-          const tM = sorted.reduce((s,l)=>(l.materials||[]).reduce((ss,m)=>ss+calcMaterialCost(m),s),0);
-          const tE = sorted.reduce((s,l)=>(l.equipment||[]).reduce((ss,e)=>ss+(Number(e.cost)||0),s),0);
-          const tO = sorted.reduce((s,l)=>s+otherCostsTotal(l.otherCosts),0);
-          const gT = tL+tM+tE+tO;
           ws1.push([`합  계`,"","","","","","","",tL,"","","","",tM,"",tE,tL,tM,tE,tO,gT,""]);
           const s1 = XLSX.utils.aoa_to_sheet(ws1);
           s1["!cols"] = [{wch:5},{wch:13},{wch:5},{wch:18},{wch:14},{wch:40},{wch:20},{wch:8},{wch:13},{wch:22},{wch:10},{wch:7},{wch:13},{wch:14},{wch:20},{wch:14},{wch:13},{wch:13},{wch:13},{wch:13},{wch:13},{wch:14},{wch:22}];
