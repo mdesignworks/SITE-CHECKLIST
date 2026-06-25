@@ -2731,23 +2731,148 @@
         setTimeout(() => setSaved(false), 1800);
       };
 
-      const exportDailyLogXlsx = async () => {
-        setExporting("dailylog");
+      // onlySheet: null(전체) | "일일작업일지" | "자재상세내역" | "장비상세내역" | "비용집계"
+      const exportDailyLogXlsx = async (onlySheet) => {
+        const expKey = onlySheet ? "sheet_" + onlySheet : "dailylog";
+        setExporting(expKey);
         try {
           const logs = await fetchCollection("dailyLogs", siteId);
-          const rows = [...logs].sort((a,b) => a.date.localeCompare(b.date)).map(l => ({
-            날짜: l.date, 공정: l.process, 위치: l.area||"", 내용: l.content||"",
-            인건비: (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0),
-            자재비: (l.materials||[]).reduce((s,m)=>s+calcMaterialCost(m),0),
-            장비비: (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0),
-            기타비용: otherCostsTotal(l.otherCosts),
-            합계: Number(l.totalCost)||0,
-            비고: l.note||"",
-          }));
-          const ws = XLSX.utils.json_to_sheet(rows);
+          const sorted = [...logs].sort((a,b) => a.date.localeCompare(b.date));
+          if (sorted.length === 0) { notify("내보낼 작업일지가 없습니다."); return; }
+
+          const DAYS = ["일","월","화","수","목","금","토"];
+          const period = (form.periodStart && form.periodEnd)
+            ? `${form.periodStart} ~ ${form.periodEnd}`
+            : (form.periodStart || form.periodEnd || "");
+          const getProcesses = (l) => (Array.isArray(l.processes) && l.processes.length ? l.processes : (l.process ? [l.process] : []));
+          const include = (name) => !onlySheet || onlySheet === name;
+
           const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, "작업일지");
-          XLSX.writeFile(wb, `${siteName}_작업일지_${today}.xlsx`);
+
+          // ===== 시트1: 일일작업일지 =====
+          if (include("일일작업일지")) {
+          const ws1 = [
+            [`인테리어 공사  일일 작업일지`],
+            [`현장명`, siteName||"", "", "", "", `현장주소`, form.address||"", "", "", "", "", `공사기간`, period, "", "", "", `발주처`, form.client||"", "", "", ""],
+            [`기본 정보`, "", "", "", `공정 및 인력`, "", "", "", "", "", `자재 투입 내역`, "", "", "", "", `장비 투입 내역`, "", `비용 집계`, "", "", "", "", `메모`],
+            [`No.`, `날  짜`, `요  일`, `공  정`, `작업구역`, `작업내용`, `작업자(역할)`, `투입인원\n(명)`, `인건비\n(원)`, `자재명`, `규격/단위`, `수  량`, `단  가\n(원)`, `자재비\n합계(원)`, `투입장비`, `장비임대비\n(원)`, `인건비\n소계`, `자재비\n소계`, `장비비\n소계`, `기타비용\n(원)`, `일일\n총비용`, `누적\n총비용`, `특이사항`],
+          ];
+          let cumCost = 0;
+          sorted.forEach((l, i) => {
+            const d = new Date(l.date);
+            const workers = l.workers || [];
+            const materials = l.materials || [];
+            const equipment = l.equipment || [];
+            const laborCost = workers.reduce((s,w) => s+(Number(w.laborCost)||0), 0);
+            const matCost = materials.reduce((s,m) => s+calcMaterialCost(m), 0);
+            const eqCost = equipment.reduce((s,e) => s+(Number(e.cost)||0), 0);
+            const otherCost = otherCostsTotal(l.otherCosts);
+            const dailyTotal = Number(l.totalCost) || (laborCost+matCost+eqCost+otherCost);
+            cumCost += dailyTotal;
+            ws1.push([
+              i+1, l.date, DAYS[d.getDay()], getProcesses(l).join("·"), l.area||"", l.content||"",
+              workers.map(w=>w.role||"").filter(Boolean).join(" / "),
+              workers.reduce((s,w)=>s+(Number(w.count)||0),0)||"",
+              laborCost||0,
+              materials.map(m=>m.name||"").filter(Boolean).join(", "),
+              materials.map(m=>m.unit||"").filter(Boolean).join(", "),
+              materials.reduce((s,m)=>s+(Number(m.qty)||0),0)||"",
+              "", matCost||0,
+              equipment.map(e=>e.name||"").filter(Boolean).join(", "),
+              eqCost||0,
+              laborCost||0, matCost||0, eqCost||0, otherCost||0,
+              dailyTotal||0, cumCost,
+              l.note||""
+            ]);
+          });
+          const tL = sorted.reduce((s,l)=>(l.workers||[]).reduce((ss,w)=>ss+(Number(w.laborCost)||0),s),0);
+          const tM = sorted.reduce((s,l)=>(l.materials||[]).reduce((ss,m)=>ss+calcMaterialCost(m),s),0);
+          const tE = sorted.reduce((s,l)=>(l.equipment||[]).reduce((ss,e)=>ss+(Number(e.cost)||0),s),0);
+          const tO = sorted.reduce((s,l)=>s+otherCostsTotal(l.otherCosts),0);
+          const gT = tL+tM+tE+tO;
+          ws1.push([`합  계`,"","","","","","","",tL,"","","","",tM,"",tE,tL,tM,tE,tO,gT,""]);
+          const s1 = XLSX.utils.aoa_to_sheet(ws1);
+          s1["!cols"] = [{wch:5},{wch:13},{wch:5},{wch:18},{wch:14},{wch:40},{wch:20},{wch:8},{wch:13},{wch:22},{wch:10},{wch:7},{wch:13},{wch:14},{wch:20},{wch:14},{wch:13},{wch:13},{wch:13},{wch:13},{wch:13},{wch:14},{wch:22}];
+          XLSX.utils.book_append_sheet(wb, s1, "일일작업일지");
+          } // end include 일일작업일지
+
+          // ===== 시트2: 자재상세내역 =====
+          if (include("자재상세내역")) {
+          const ws2 = [
+            [`자재 투입 상세 내역`],
+            [`No.`, `날짜`, `공정`, `자재명`, `규격`, `단위`, `수량`, `단가(원)`, `금액(원)`, `비고`],
+          ];
+          let mn = 1;
+          sorted.forEach(l => {
+            (l.materials||[]).forEach(m => {
+              if (!m.name && !calcMaterialCost(m)) return;
+              ws2.push([mn++, l.date, getProcesses(l).join("·"), m.name||"", "", m.unit||"", Number(m.qty)||0, Number(m.unitPrice)||0, calcMaterialCost(m), ""]);
+            });
+          });
+          ws2.push([`합  계`,"","","","","","","", ws2.slice(2).reduce((s,r)=>s+(Number(r[8])||0),0), ""]);
+          const s2 = XLSX.utils.aoa_to_sheet(ws2);
+          s2["!cols"] = [{wch:6},{wch:13},{wch:18},{wch:22},{wch:12},{wch:8},{wch:8},{wch:13},{wch:14},{wch:20}];
+          XLSX.utils.book_append_sheet(wb, s2, "자재상세내역");
+          } // end include 자재상세내역
+
+          // ===== 시트3: 장비상세내역 =====
+          if (include("장비상세내역")) {
+          const ws3 = [
+            [`장비 투입 상세 내역`],
+            [`No.`, `날짜`, `공정`, `장비명`, `수량`, `임대비(원)`, `비고`],
+          ];
+          let en = 1;
+          sorted.forEach(l => {
+            (l.equipment||[]).forEach(e => {
+              if (!e.name && !(Number(e.cost))) return;
+              ws3.push([en++, l.date, getProcesses(l).join("·"), e.name||"", 1, Number(e.cost)||0, ""]);
+            });
+          });
+          ws3.push([`합  계`,"","","","", ws3.slice(2).reduce((s,r)=>s+(Number(r[5])||0),0), ""]);
+          const s3 = XLSX.utils.aoa_to_sheet(ws3);
+          s3["!cols"] = [{wch:6},{wch:13},{wch:18},{wch:22},{wch:8},{wch:14},{wch:20}];
+          XLSX.utils.book_append_sheet(wb, s3, "장비상세내역");
+          } // end include 장비상세내역
+
+          // ===== 시트4: 비용집계 =====
+          if (include("비용집계")) {
+          const ws4 = [
+            [`공사 비용 집계표`],
+            [`▶  공사비 예산 대비 실적`],
+            [`구분`, `예산(원)`, `실적(원)`, `잔액(원)`, `집행률(%)`, `비고`],
+            [`인건비`, "", tL, "", 0, ""],
+            [`자재비`, "", tM, "", 0, ""],
+            [`장비비`, "", tE, "", 0, ""],
+            [`기타경비`, "", tO, "", 0, ""],
+            [`합  계`, 0, gT, "", "", ""],
+            [`VAT (10%)`, 0, Math.round(gT*0.1), "", "", ""],
+            [`합계 (VAT 포함)`, 0, gT+Math.round(gT*0.1), "", "", ""],
+            [`▶  월별 비용 집계`],
+            [`월`, `인건비(원)`, `자재비(원)`, `장비비(원)`, `기타(원)`, `합계(원)`, `비고`],
+          ];
+          const monthly = {};
+          sorted.forEach(l => {
+            const mo = l.date.slice(0,7);
+            if (!monthly[mo]) monthly[mo] = {l:0,m:0,e:0,o:0};
+            monthly[mo].l += (l.workers||[]).reduce((s,w)=>s+(Number(w.laborCost)||0),0);
+            monthly[mo].m += (l.materials||[]).reduce((s,m2)=>s+calcMaterialCost(m2),0);
+            monthly[mo].e += (l.equipment||[]).reduce((s,e)=>s+(Number(e.cost)||0),0);
+            monthly[mo].o += otherCostsTotal(l.otherCosts);
+          });
+          Object.keys(monthly).sort().forEach(mo => {
+            const v = monthly[mo];
+            ws4.push([`${mo.slice(0,4)}년 ${mo.slice(5,7)}월`, v.l, v.m, v.e, v.o, v.l+v.m+v.e+v.o, ""]);
+          });
+          const s4 = XLSX.utils.aoa_to_sheet(ws4);
+          s4["!cols"] = [{wch:18},{wch:14},{wch:14},{wch:14},{wch:12},{wch:14},{wch:20}];
+          XLSX.utils.book_append_sheet(wb, s4, "비용집계");
+          } // end include 비용집계
+
+          const suffix = onlySheet || "전체";
+          XLSX.writeFile(wb, `${siteName}_작업일지_${suffix}_${today}.xlsx`);
+        } catch(e) {
+          console.warn("export err", e);
+          notify("내보내기 중 오류가 발생했습니다.");
         } finally { setExporting(""); }
       };
 
@@ -2923,7 +3048,26 @@
             <div style={{ fontSize:13, fontWeight:700, color:"#1a1a2e", marginBottom:4 }}>데이터 내보내기</div>
             <div style={{ fontSize:11, color:"#a0aec0", marginBottom:10 }}>엑셀(.xlsx) 파일로 다운로드됩니다. 다운로드 후 공유 메뉴를 이용해 구글 드라이브 등에 저장할 수 있습니다.</div>
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              <button onClick={exportDailyLogXlsx} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="dailylog" ? "내보내는 중..." : "📝 작업일지 내보내기 (.xlsx)"}</button>
+              {/* 작업일지 전체 4시트 */}
+              <button onClick={()=>exportDailyLogXlsx(null)} disabled={!!exporting} style={{ ...dl.secondaryBtn, borderColor:"#FF6B35", color:"#FF6B35", fontWeight:700 }}>
+                {exporting==="dailylog" ? "내보내는 중..." : "📊 작업일지 전체 내보내기 (.xlsx) — 4시트 한번에"}
+              </button>
+              {/* 시트별 개별 내보내기 */}
+              <div style={{ fontSize:11, color:"#a0aec0", marginTop:2, marginBottom:2 }}>시트별 개별 내보내기</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                <button onClick={()=>exportDailyLogXlsx("일일작업일지")} disabled={!!exporting} style={dl.secondaryBtn}>
+                  {exporting==="sheet_일일작업일지" ? "..." : "📝 일일작업일지"}
+                </button>
+                <button onClick={()=>exportDailyLogXlsx("자재상세내역")} disabled={!!exporting} style={dl.secondaryBtn}>
+                  {exporting==="sheet_자재상세내역" ? "..." : "🧱 자재상세내역"}
+                </button>
+                <button onClick={()=>exportDailyLogXlsx("장비상세내역")} disabled={!!exporting} style={dl.secondaryBtn}>
+                  {exporting==="sheet_장비상세내역" ? "..." : "🚜 장비상세내역"}
+                </button>
+                <button onClick={()=>exportDailyLogXlsx("비용집계")} disabled={!!exporting} style={dl.secondaryBtn}>
+                  {exporting==="sheet_비용집계" ? "..." : "💰 비용집계"}
+                </button>
+              </div>
               <button onClick={exportScheduleXlsx} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="schedule" ? "내보내는 중..." : "📅 공정표 내보내기 (.xlsx)"}</button>
               <button onClick={exportCostXlsx} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="cost" ? "내보내는 중..." : "💰 비용 정산서 내보내기 (.xlsx)"}</button>
               <button onClick={exportBackupJson} disabled={!!exporting} style={dl.secondaryBtn}>{exporting==="backup" ? "내보내는 중..." : "💾 전체 백업 (.json)"}</button>
