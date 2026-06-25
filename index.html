@@ -195,7 +195,8 @@
       background: #16162a;
       border-bottom: 1px solid rgba(255,255,255,0.06);
       padding: 14px 16px 12px;
-      display: flex; align-items: center; justify-content: space-between;
+      padding-top: max(14px, env(safe-area-inset-top, 14px));
+      display: flex; align-items: flex-end; justify-content: space-between;
     }
     .app-header .title { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.2px; }
     .app-header .subtitle { font-size: 11px; color: #9090a8; margin-top: 2px; }
