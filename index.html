@@ -721,6 +721,9 @@
     const GANTT_COL_W = 34;
     const GANTT_NAME_W = 132;
 
+    // 현장별 색상 팔레트 (최대 8개 현장)
+    const SITE_COLORS = ["#FF6B35","#4472C4","#2ECC71","#9B59B6","#E74C3C","#F39C12","#1ABC9C","#E91E63"];
+
     function ScheduleTab() {
       const { siteId } = React.useContext(SiteContext);
       const [tasks, setTasks] = useState([]);
@@ -733,6 +736,9 @@
       const [view, setView] = useState("calendar"); // "gantt" | "calendar"
       const [calMonth, setCalMonth] = useState(today.slice(0,7)); // "YYYY-MM"
       const [selectedDay, setSelectedDay] = useState(null);
+      const [showAllSites, setShowAllSites] = useState(false);
+      const [allSitesTasks, setAllSitesTasks] = useState([]);
+      const [allSitesMeta, setAllSitesMeta] = useState([]); // [{id, name, color}]
 
       useEffect(() => {
         (async () => {
@@ -742,6 +748,23 @@
           setWeather(await fetchWeather(settings?.lat, settings?.lon));
         })();
       }, [siteId]);
+
+      useEffect(() => {
+        if (!showAllSites) return;
+        (async () => {
+          try {
+            const allSites = JSON.parse(localStorage.getItem('sites') || '[]');
+            const meta = allSites.map((s, i) => ({ id: s.id, name: s.name || s.id, color: SITE_COLORS[i % SITE_COLORS.length] }));
+            setAllSitesMeta(meta);
+            const results = await Promise.all(meta.map(s => fetchCollection("schedule", s.id)));
+            const combined = [];
+            results.forEach((siteTasks, i) => {
+              siteTasks.forEach(t => combined.push({ ...t, _siteName: meta[i].name, _siteColor: meta[i].color }));
+            });
+            setAllSitesTasks(combined);
+          } catch(e) { console.warn('allSites err', e); }
+        })();
+      }, [showAllSites, siteId]);
 
       const sorted = useMemo(() => [...tasks].sort((a,b) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id)), [tasks]);
 
@@ -881,6 +904,10 @@
               </div>
             )}
             <div style={{ marginLeft:"auto", display:"flex", gap:4 }}>
+              <button onClick={()=>{ setShowAllSites(v=>!v); setSelectedDay(null); }} style={{
+                border:"1px solid #e2e8f0", borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer",
+                background: showAllSites ? "#2ECC71" : "#fff", color: showAllSites ? "#fff" : "#718096",
+              }}>🏢 전체현장</button>
               <button onClick={()=>setView("gantt")} style={{
                 border:"1px solid #e2e8f0", borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer",
                 background: view==="gantt" ? "#FF6B35" : "#fff", color: view==="gantt" ? "#fff" : "#718096",
@@ -1058,23 +1085,35 @@
           <div style={{ fontSize:11, color:"#a0aec0", marginTop:8, textAlign:"center" }}>좌우로 스크롤하여 전체 공정을 확인하세요 · 공정 막대를 터치하면 완료 처리됩니다</div>
           )}
 
+          {showAllSites && allSitesMeta.length > 0 && (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, padding:"8px 12px", background:"#f7fafc", borderRadius:10, border:"1px solid #e2e8f0", marginBottom:8 }}>
+              {allSitesMeta.map(s => (
+                <div key={s.id} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                  <span style={{ width:12, height:12, borderRadius:3, background:s.color, display:"inline-block", flexShrink:0 }} />
+                  <span style={{ fontSize:12, color:"#4a5568", fontWeight:600 }}>{s.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {view === "calendar" && (
             <CalendarView
-              tasks={tasks}
+              tasks={showAllSites ? allSitesTasks : tasks}
               weather={weather}
               calMonth={calMonth}
               setCalMonth={setCalMonth}
               selectedDay={selectedDay}
               setSelectedDay={setSelectedDay}
               today={today}
-              toggleDone={toggleDone}
-              startEdit={(t)=>{ startEdit(t); setAdding(false); }}
-              removeTask={removeTask}
+              toggleDone={showAllSites ? ()=>{} : toggleDone}
+              startEdit={showAllSites ? ()=>{} : (t)=>{ startEdit(t); setAdding(false); }}
+              removeTask={showAllSites ? ()=>{} : removeTask}
               editingId={editingId}
               editForm={editForm}
               setEditForm={setEditForm}
               saveEdit={saveEdit}
               cancelEdit={cancelEdit}
+              showAllSites={showAllSites}
             />
           )}
         </div>
@@ -1084,7 +1123,7 @@
     /* ---- 공정표 달력 뷰 ---- */
     const RAIN_ALERT_THRESHOLD = 50; // 강수확률(%) 이 값 이상이면 "우천 주의" 배지 표시
 
-    function CalendarView({ tasks, weather, calMonth, setCalMonth, selectedDay, setSelectedDay, today, toggleDone, startEdit, removeTask, editingId, editForm, setEditForm, saveEdit, cancelEdit }) {
+    function CalendarView({ tasks, weather, calMonth, setCalMonth, selectedDay, setSelectedDay, today, toggleDone, startEdit, removeTask, editingId, editForm, setEditForm, saveEdit, cancelEdit, showAllSites }) {
       const [y, m] = calMonth.split("-").map(Number);
 
       const tasksByDate = useMemo(() => {
@@ -1150,10 +1189,10 @@
                         {dayTasks.slice(0,4).map((t,ti) => (
                           <div key={ti} style={{
                             width:8, height:8, borderRadius:"50%",
-                            background: hasDelay && isDelayed(t,today) ? DELAY_COLOR : (t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned),
+                            background: hasDelay && isDelayed(t,today) ? DELAY_COLOR : (t._siteColor || t.color || STATUS_COLOR[t.status] || STATUS_COLOR.planned),
                             opacity: t.status==="done" ? 0.45 : 1,
                             flexShrink:0,
-                          }} title={t.name} />
+                          }} title={`${t._siteName ? t._siteName+' · ' : ''}${t.name}`} />
                         ))}
                         {dayTasks.length > 4 && <div style={{ fontSize:9, fontWeight:700, color:"#a0aec0", lineHeight:1 }}>+{dayTasks.length-4}</div>}
                       </div>
@@ -1231,15 +1270,20 @@
                       <span style={{ fontSize:10, fontWeight:700, color:"#fff", borderRadius:4, padding:"2px 6px", flexShrink:0, background:DELAY_COLOR }}>⚠️  지연</span>
                     )}
                     <span style={{ flex:1, display:"flex", flexDirection:"column" }}>
-                      <span style={{
-                        fontSize:13, color: t.status==="done" ? "#a0aec0" : "#2d3748",
-                        textDecoration: t.status==="done" ? "line-through" : "none",
-                      }}>{t.name}</span>
+                      <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+                        {t._siteName && (
+                          <span style={{ fontSize:10, fontWeight:800, color:"#fff", background:t._siteColor||"#718096", borderRadius:4, padding:"1px 5px", flexShrink:0 }}>{t._siteName.slice(0,2)}</span>
+                        )}
+                        <span style={{
+                          fontSize:13, color: t.status==="done" ? "#a0aec0" : "#2d3748",
+                          textDecoration: t.status==="done" ? "line-through" : "none",
+                        }}>{t.name}</span>
+                      </span>
                       {t.detail && <span style={{ fontSize:11, color:"#a0aec0" }}>{t.detail}</span>}
                     </span>
-                    <button onClick={()=>toggleDone(t)} title="완료 토글" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:14, cursor:"pointer" }}>✓</button>
-                    <button onClick={()=>startEdit(t)} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer" }}>✏️</button>
-                    <button onClick={()=>removeTask(t.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:15, cursor:"pointer" }}>×</button>
+                    {!showAllSites && <button onClick={()=>toggleDone(t)} title="완료 토글" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:14, cursor:"pointer" }}>✓</button>}
+                    {!showAllSites && <button onClick={()=>startEdit(t)} title="수정" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:13, cursor:"pointer" }}>✏️</button>}
+                    {!showAllSites && <button onClick={()=>removeTask(t.id)} title="삭제" style={{ background:"none", border:"none", color:"#a0aec0", fontSize:15, cursor:"pointer" }}>×</button>}
                   </div>
                 );
               })}
